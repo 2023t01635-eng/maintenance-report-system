@@ -1,12 +1,48 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 
+const admin = {
+  id: "admin-1",
+  name: "System Administrator",
+  email: "admin@example.com",
+  role: "ADMIN",
+  isActive: true
+};
+
+function response(body: unknown, status = 200) {
+  return Promise.resolve(new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  }));
+}
+
 describe("App", () => {
-  it("renders the project dashboard", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("shows first-time administrator setup when no users exist", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ needsSetup: true }));
+
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: /Maintenance Request Reporting System/i })).toBeInTheDocument();
-    expect(screen.getByText(/Role Experiences/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Create administrator/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Full name/i)).toBeInTheDocument();
+  });
+
+  it("renders the authenticated administrator dashboard", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/setup-status")) return response({ needsSetup: false });
+      if (url.endsWith("/auth/me")) return response({ user: admin });
+      if (url.endsWith("/dashboard/summary")) return response({ role: "ADMIN", totals: { machines: 3, openAlerts: 2, activeWorkOrders: 1, activeUsers: 4 } });
+      if (url.endsWith("/users")) return response({ users: [admin] });
+      return response({ message: "Not found" }, 404);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /Maintenance overview/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /User management/i })).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
   });
 });

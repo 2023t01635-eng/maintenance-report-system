@@ -60,6 +60,11 @@ Run the API and frontend:
 
 ```powershell
 npm run dev:api
+```
+
+In a second PowerShell window:
+
+```powershell
 npm run dev:web
 ```
 
@@ -101,8 +106,16 @@ npm run docker:down
 | Machine Operator | Maintains assigned machines, parts, dates, and approvals |
 | Service Provider | Views approved work orders and submits completion evidence |
 
+## First Administrator
+
+When the database has no users, the web application opens the protected first-time setup screen. Create the administrator there, then use the administrator workspace to add Owner, Manager, Machine Operator, and Service Provider accounts.
+
+Authentication uses hashed passwords and an HTTP-only session cookie. The initial administrator endpoint is automatically disabled after the first user exists.
+
 ## Milestone Status
 
-Milestone 1 creates the foundation: monorepo, API shell, web shell, Prisma schema, Docker Compose, project instructions, and setup documentation.
+Milestone 1 created the monorepo, API and web shells, Prisma schema, Docker Compose configuration, and setup documentation.
 
-Next milestone: authentication, first admin setup, password hashing, role-based access control, and role dashboards.
+Milestone 2 adds first-admin setup, password hashing, login/logout, protected sessions, role-based access control, role-aware dashboards, administrator user management, audit events, and automated authentication tests.
+
+Next milestone: machine and part records, operator assignment, and maintenance date workflows.

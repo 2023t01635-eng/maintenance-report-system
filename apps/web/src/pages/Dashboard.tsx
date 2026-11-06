@@ -1,124 +1,147 @@
-import { AlertTriangle, ClipboardList, Database, FileText, ShieldCheck, Wrench } from "lucide-react";
-import { useEffect, useState } from "react";
-import { StatusBadge } from "../components/StatusBadge";
-import { getHealth } from "../services/api";
+import { AlertTriangle, ClipboardList, Database, LogOut, ShieldCheck, Users, Wrench } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import {
+  createUser,
+  getDashboardSummary,
+  getUsers,
+  logout,
+  updateUser,
+  type DashboardSummary,
+  type Role,
+  type User
+} from "../services/api";
 
-type ApiState = "checking" | "online" | "offline";
+const roleLabels: Record<Role, string> = {
+  ADMIN: "Administrator",
+  OWNER: "Owner",
+  MANAGER: "Manager",
+  MACHINE_OPERATOR: "Machine Operator",
+  SERVICE_PROVIDER: "Service Provider"
+};
 
-const roleCards = [
-  {
-    title: "Admin",
-    text: "Users, roles, settings, and audit logs."
-  },
-  {
-    title: "Owner",
-    text: "Assets, approvals, evidence, costs, and reports."
-  },
-  {
-    title: "Manager",
-    text: "Operations, assignments, verification, and deadlines."
-  },
-  {
-    title: "Machine Operator",
-    text: "Assigned machinery, parts, dates, and provider approval."
-  },
-  {
-    title: "Service Provider",
-    text: "Approved work orders, progress, and completion evidence."
-  }
-];
+const roles = Object.keys(roleLabels) as Role[];
 
-const workflowItems = [
-  {
-    icon: Database,
-    title: "Machine Records",
-    text: "Store machinery, parts, warranty dates, and replacement dates."
-  },
-  {
-    icon: AlertTriangle,
-    title: "Due Alerts",
-    text: "Create threshold alerts before maintenance or warranty deadlines."
-  },
-  {
-    icon: ClipboardList,
-    title: "Work Orders",
-    text: "Share approved tasks with service providers and track completion."
-  },
-  {
-    icon: FileText,
-    title: "Reports",
-    text: "Generate daily and monthly CSV/PDF maintenance reports."
-  }
-];
+type DashboardProps = {
+  user: User;
+  onLoggedOut: () => void;
+};
 
-export function Dashboard() {
-  const [apiState, setApiState] = useState<ApiState>("checking");
+export function Dashboard({ user, onLoggedOut }: DashboardProps) {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [error, setError] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<Role>("MACHINE_OPERATOR");
 
   useEffect(() => {
-    getHealth()
-      .then(() => setApiState("online"))
-      .catch(() => setApiState("offline"));
-  }, []);
+    getDashboardSummary().then(setSummary).catch((requestError: Error) => setError(requestError.message));
+    if (user.role === "ADMIN") {
+      getUsers().then((response) => setUsers(response.users)).catch((requestError: Error) => setError(requestError.message));
+    }
+  }, [user.role]);
+
+  async function handleLogout() {
+    await logout().catch(() => undefined);
+    onLoggedOut();
+  }
+
+  async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+
+    try {
+      const response = await createUser({ name, email, password, role });
+      setUsers((current) => [...current, response.user].sort((a, b) => a.name.localeCompare(b.name)));
+      setName("");
+      setEmail("");
+      setPassword("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to create user");
+    }
+  }
+
+  async function toggleUser(target: User) {
+    try {
+      const response = await updateUser(target.id, { isActive: !target.isActive });
+      setUsers((current) => current.map((item) => (item.id === target.id ? response.user : item)));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to update user");
+    }
+  }
+
+  const metrics = [
+    { label: "Machines", value: summary?.totals.machines ?? "-", icon: Database },
+    { label: "Open alerts", value: summary?.totals.openAlerts ?? "-", icon: AlertTriangle },
+    { label: "Active work orders", value: summary?.totals.activeWorkOrders ?? "-", icon: ClipboardList },
+    { label: "Active users", value: summary?.totals.activeUsers ?? "-", icon: Users }
+  ];
 
   return (
-    <main className="dashboard">
-      <section className="hero-band">
-        <div>
-          <p className="eyebrow">University of Colombo - Faculty of Technology</p>
-          <h1>Maintenance Request Reporting System</h1>
-          <p className="hero-copy">
-            A role-based platform for machinery records, warranty tracking, preventive maintenance, external service work,
-            evidence, and daily/monthly reports.
-          </p>
+    <main className="app-shell">
+      <header className="topbar">
+        <div className="topbar-title">
+          <span className="compact-mark"><Wrench aria-hidden="true" /></span>
+          <div><strong>Maintenance Report System</strong><span>Faculty of Technology</span></div>
         </div>
-        <div className="hero-panel" aria-label="System status">
-          <div className="panel-icon">
-            <Wrench aria-hidden="true" />
-          </div>
-          <StatusBadge status={apiState} />
-          <p>Milestone 1 foundation is ready for authentication, CRUD workflows, alerts, and reports.</p>
+        <div className="account-actions">
+          <div><strong>{user.name}</strong><span>{roleLabels[user.role]}</span></div>
+          <button className="icon-button" onClick={handleLogout} type="button" title="Sign out" aria-label="Sign out"><LogOut aria-hidden="true" /></button>
         </div>
-      </section>
+      </header>
 
-      <section className="content-grid">
-        <div className="section-block">
-          <div className="section-heading">
-            <ShieldCheck aria-hidden="true" />
-            <div>
-              <h2>Role Experiences</h2>
-              <p>Five controlled experiences keep responsibilities clear for the demo and Q&A.</p>
-            </div>
+      <section className="dashboard-content">
+        <div className="welcome-row">
+          <div>
+            <p className="eyebrow">{roleLabels[user.role]} workspace</p>
+            <h1>Maintenance overview</h1>
+            <p className="muted">Monitor the records and work currently available to your role.</p>
           </div>
-          <div className="role-grid">
-            {roleCards.map((role) => (
-              <article className="role-card" key={role.title}>
-                <h3>{role.title}</h3>
-                <p>{role.text}</p>
-              </article>
-            ))}
-          </div>
+          <span className="access-badge"><ShieldCheck aria-hidden="true" /> Secure session</span>
         </div>
 
-        <div className="section-block">
-          <div className="section-heading">
-            <ClipboardList aria-hidden="true" />
-            <div>
-              <h2>Core Workflow</h2>
-              <p>The MVP is built around records, deadline checks, approvals, evidence, and reports.</p>
-            </div>
-          </div>
-          <div className="workflow-list">
-            {workflowItems.map((item) => (
-              <article className="workflow-item" key={item.title}>
-                <item.icon aria-hidden="true" />
-                <div>
-                  <h3>{item.title}</h3>
-                  <p>{item.text}</p>
-                </div>
-              </article>
-            ))}
-          </div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+
+        <div className="metric-grid">
+          {metrics.map((metric) => (
+            <article className="metric-card" key={metric.label}>
+              <metric.icon aria-hidden="true" />
+              <div><strong>{metric.value}</strong><span>{metric.label}</span></div>
+            </article>
+          ))}
         </div>
+
+        {user.role === "ADMIN" && (
+          <section className="admin-section">
+            <div className="section-heading">
+              <div><p className="eyebrow">Administration</p><h2>User management</h2></div>
+              <span>{users.length} accounts</span>
+            </div>
+
+            <form className="user-form" onSubmit={handleCreateUser}>
+              <label>Name<input value={name} onChange={(event) => setName(event.target.value)} required minLength={2} /></label>
+              <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+              <label>Temporary password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={8} /></label>
+              <label>Role<select value={role} onChange={(event) => setRole(event.target.value as Role)}>{roles.map((item) => <option key={item} value={item}>{roleLabels[item]}</option>)}</select></label>
+              <button className="primary-button" type="submit">Add user</button>
+            </form>
+
+            <div className="user-list">
+              {users.map((item) => (
+                <article className="user-row" key={item.id}>
+                  <div className="user-avatar" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</div>
+                  <div className="user-identity"><strong>{item.name}</strong><span>{item.email}</span></div>
+                  <span className="role-pill">{roleLabels[item.role]}</span>
+                  <span className={item.isActive ? "status-active" : "status-inactive"}>{item.isActive ? "Active" : "Inactive"}</span>
+                  <button className="secondary-button" disabled={item.id === user.id} onClick={() => toggleUser(item)} type="button">
+                    {item.isActive ? "Deactivate" : "Activate"}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
       </section>
     </main>
   );

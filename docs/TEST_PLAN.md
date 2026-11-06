@@ -2,33 +2,41 @@
 
 ## Automated Tests
 
-Milestone 1 includes:
+Milestone 2 includes:
 
-- API health route test
-- React dashboard render test
+- API health route verification
+- First-time setup status and initial administrator creation
+- Password hashing and invalid-login handling
+- Administrator-only user management enforcement
+- Frontend first-time setup rendering
+- Authenticated administrator dashboard rendering
 
-Run:
+Run the complete checks:
 
 ```powershell
+npm run typecheck
 npm test
+npm run build
 ```
+
+## Manual Authentication Checks
+
+1. Start PostgreSQL with `docker compose up db -d`.
+2. Start the API with `npm run dev:api`.
+3. Start the web app in another terminal with `npm run dev:web`.
+4. Open `http://localhost:5173` and create the first administrator.
+5. Sign out, sign in with the administrator account, and confirm the dashboard loads.
+6. Add one Machine Operator account from User Management.
+7. Sign in as that operator and confirm User Management is not displayed.
+8. Confirm a direct request to `/api/users` with the operator session returns HTTP 403.
+9. Deactivate the operator and confirm the account can no longer sign in.
 
 ## Next Test Areas
 
 | Area | Tests |
 |---|---|
-| Authentication | Login success/failure, password hash check |
-| RBAC | Admin-only user creation, provider restricted views |
-| Machines | Machine CRUD and assignment checks |
-| Parts | Part CRUD and due date validation |
+| Machines | Machine create, update, assignment, and role checks |
+| Parts | Part create, update, due-date validation, and deletion rules |
 | Alerts | Scheduler creates alerts and avoids duplicates |
-| Reports | Daily/monthly data filters and export checks |
-
-## Manual Demo Checks
-
-1. Start Docker Desktop.
-2. Run `docker compose up --build`.
-3. Open `http://localhost:5173`.
-4. Open `http://localhost:4000/api/health`.
-5. Open `http://localhost:4000/api/docs`.
-6. Confirm frontend shows API Online.
+| Work orders | Approval transitions and provider visibility |
+| Reports | Daily/monthly filters and export checks |
