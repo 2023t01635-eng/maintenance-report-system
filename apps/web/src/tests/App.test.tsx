@@ -44,5 +44,22 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: /Maintenance overview/i })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: /User management/i })).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Assets" })).toBeInTheDocument();
+  });
+
+  it("does not expose the asset workspace to service providers", async () => {
+    const provider = { ...admin, id: "provider-1", name: "Service Provider", role: "SERVICE_PROVIDER" };
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/setup-status")) return response({ needsSetup: false });
+      if (url.endsWith("/auth/me")) return response({ user: provider });
+      if (url.endsWith("/dashboard/summary")) return response({ role: "SERVICE_PROVIDER", totals: { machines: 0, openAlerts: 0, activeWorkOrders: 2, activeUsers: 0 } });
+      return response({ message: "Not found" }, 404);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /Maintenance overview/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assets" })).not.toBeInTheDocument();
   });
 });

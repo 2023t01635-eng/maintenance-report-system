@@ -20,7 +20,7 @@ flowchart LR
 | Prisma ORM | Typed database access and migrations |
 | PostgreSQL | Relational storage for system records |
 | Scheduler | Daily checks for warranty, replacement, and maintenance deadlines |
-| Swagger | API documentation for testing and demonstration |
+| Swagger | Baseline API documentation; health is currently annotated |
 
 ## Architecture Decision
 

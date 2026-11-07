@@ -1,5 +1,6 @@
-import { AlertTriangle, ClipboardList, Database, LogOut, ShieldCheck, Users, Wrench } from "lucide-react";
+import { AlertTriangle, Boxes, ClipboardList, Database, LayoutDashboard, LogOut, ShieldCheck, Users, Wrench } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
+import { AssetWorkspace } from "./AssetWorkspace";
 import {
   createUser,
   getDashboardSummary,
@@ -27,6 +28,7 @@ type DashboardProps = {
 };
 
 export function Dashboard({ user, onLoggedOut }: DashboardProps) {
+  const [activeView, setActiveView] = useState<"overview" | "assets">("overview");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
@@ -91,8 +93,20 @@ export function Dashboard({ user, onLoggedOut }: DashboardProps) {
         </div>
       </header>
 
+      <nav className="workspace-nav" aria-label="Main workspace">
+        <button className={activeView === "overview" ? "active" : ""} type="button" onClick={() => setActiveView("overview")} aria-current={activeView === "overview" ? "page" : undefined}>
+          <LayoutDashboard aria-hidden="true" /> Overview
+        </button>
+        {user.role !== "SERVICE_PROVIDER" && (
+          <button className={activeView === "assets" ? "active" : ""} type="button" onClick={() => setActiveView("assets")} aria-current={activeView === "assets" ? "page" : undefined}>
+            <Boxes aria-hidden="true" /> Assets
+          </button>
+        )}
+      </nav>
+
       <section className="dashboard-content">
-        <div className="welcome-row">
+        {activeView === "assets" && user.role !== "SERVICE_PROVIDER" ? <AssetWorkspace user={user} /> : <>
+          <div className="welcome-row">
           <div>
             <p className="eyebrow">{roleLabels[user.role]} workspace</p>
             <h1>Maintenance overview</h1>
@@ -112,7 +126,7 @@ export function Dashboard({ user, onLoggedOut }: DashboardProps) {
           ))}
         </div>
 
-        {user.role === "ADMIN" && (
+          {user.role === "ADMIN" && (
           <section className="admin-section">
             <div className="section-heading">
               <div><p className="eyebrow">Administration</p><h2>User management</h2></div>
@@ -141,7 +155,8 @@ export function Dashboard({ user, onLoggedOut }: DashboardProps) {
               ))}
             </div>
           </section>
-        )}
+          )}
+        </>}
       </section>
     </main>
   );
