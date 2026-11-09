@@ -109,7 +109,10 @@ describe("Milestone 4 alerts", () => {
     const response = await request(app).get("/api/dashboard/summary").set("Authorization", bearer(provider));
     expect(response.body.totals).toEqual({ machines: 0, openAlerts: 0, activeWorkOrders: 2, activeUsers: 1 });
     expect(mocks.prisma.workOrder.count).toHaveBeenCalledWith({
-      where: { status: { notIn: ["COMPLETED", "CANCELLED"] }, providerId: "provider-1" }
+      where: {
+        providerId: "provider-1",
+        status: { in: ["APPROVED", "SENT_TO_PROVIDER", "IN_PROGRESS"] }
+      }
     });
   });
 

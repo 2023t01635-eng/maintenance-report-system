@@ -63,18 +63,18 @@ enum EvidenceType {
 }
 
 model User {
-  id                   String      @id @default(uuid())
-  name                 String
-  email                String      @unique
-  passwordHash         String
-  role                 Role
-  isActive             Boolean     @default(true)
-  createdAt            DateTime    @default(now())
-  updatedAt            DateTime    @updatedAt
-  assignedMachines     Machine[]   @relation("OperatorMachines")
-  providerWorkOrders   WorkOrder[] @relation("ProviderWorkOrders")
-  approvedWorkOrders   WorkOrder[] @relation("OperatorApprovedWorkOrders")
-  auditLogs            AuditLog[]  @relation("ActorAuditLogs")
+  id                 String      @id @default(uuid())
+  name               String
+  email              String      @unique
+  passwordHash       String
+  role               Role
+  isActive           Boolean     @default(true)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  assignedMachines   Machine[]   @relation("OperatorMachines")
+  providerWorkOrders WorkOrder[] @relation("ProviderWorkOrders")
+  approvedWorkOrders WorkOrder[] @relation("OperatorApprovedWorkOrders")
+  auditLogs          AuditLog[]  @relation("ActorAuditLogs")
 
   @@index([role])
   @@index([isActive])
@@ -107,18 +107,18 @@ model Machine {
 }
 
 model MachinePart {
-  id             String      @id @default(uuid())
+  id             String    @id @default(uuid())
   machineId      String
-  machine        Machine     @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machine        Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
   name           String
   partNumber     String?
   warrantyStart  DateTime?
   warrantyEnd    DateTime?
   replacementDue DateTime?
-  quantity       Int         @default(1)
+  quantity       Int       @default(1)
   alerts         Alert[]
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([machineId])
   @@index([warrantyEnd])
@@ -171,23 +171,24 @@ model Alert {
 }
 
 model WorkOrder {
-  id                   String          @id @default(uuid())
+  id                   String            @id @default(uuid())
   machineId            String
-  machine              Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machine              Machine           @relation(fields: [machineId], references: [id], onDelete: Cascade)
   providerId           String?
-  provider             User?           @relation("ProviderWorkOrders", fields: [providerId], references: [id])
+  provider             User?             @relation("ProviderWorkOrders", fields: [providerId], references: [id])
   approvedByOperatorId String?
-  approvedByOperator   User?           @relation("OperatorApprovedWorkOrders", fields: [approvedByOperatorId], references: [id])
+  approvedByOperator   User?             @relation("OperatorApprovedWorkOrders", fields: [approvedByOperatorId], references: [id])
   title                String
   description          String?
-  status               WorkOrderStatus @default(DRAFT)
+  status               WorkOrderStatus   @default(DRAFT)
   scheduledDate        DateTime?
   completedDate        DateTime?
-  cost                 Decimal?        @db.Decimal(12, 2)
+  cost                 Decimal?          @db.Decimal(12, 2)
+  replacedParts        String?
   notes                String?
   evidence             ServiceEvidence[]
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   @@index([machineId])
   @@index([providerId])

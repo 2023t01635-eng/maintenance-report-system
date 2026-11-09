@@ -18,11 +18,16 @@ dashboardRouter.get("/summary", requireAuth, async (req, res) => {
     ...(user.role === Role.MACHINE_OPERATOR ? { machine: { operatorId: user.id } } : {}),
     ...(user.role === Role.SERVICE_PROVIDER ? { id: "__external_users_have_no_alert_scope__" } : {})
   };
-  const workOrderWhere: Prisma.WorkOrderWhereInput = {
-    status: { notIn: ["COMPLETED", "CANCELLED"] },
-    ...(user.role === Role.MACHINE_OPERATOR ? { machine: { operatorId: user.id } } : {}),
-    ...(user.role === Role.SERVICE_PROVIDER ? { providerId: user.id } : {})
-  };
+  const workOrderWhere: Prisma.WorkOrderWhereInput =
+    user.role === Role.SERVICE_PROVIDER
+      ? {
+          providerId: user.id,
+          status: { in: ["APPROVED", "SENT_TO_PROVIDER", "IN_PROGRESS"] }
+        }
+      : {
+          status: { notIn: ["COMPLETED", "CANCELLED"] },
+          ...(user.role === Role.MACHINE_OPERATOR ? { machine: { operatorId: user.id } } : {})
+        };
   const [machines, openAlerts, activeWorkOrders, users] = await Promise.all([
     prisma.machine.count({ where: machineWhere }),
     prisma.alert.count({ where: alertWhere }),

@@ -134,6 +134,74 @@ export type AlertSchedulerResult = {
   evaluatedAt: string;
 };
 
+export type WorkOrderStatus =
+  | "DRAFT"
+  | "PENDING_OPERATOR_APPROVAL"
+  | "APPROVED"
+  | "SENT_TO_PROVIDER"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "CANCELLED";
+
+export type EvidenceType = "SERVICE_REPORT" | "INVOICE" | "PAYMENT_SLIP" | "PHOTO" | "OTHER";
+
+export type WorkOrderProvider = Pick<User, "id" | "name" | "email" | "role" | "isActive">;
+
+export type ServiceEvidence = {
+  id: string;
+  workOrderId: string;
+  type: EvidenceType;
+  fileName: string;
+  fileUrl: string | null;
+  notes: string | null;
+  createdAt: string;
+};
+
+export type WorkOrder = {
+  id: string;
+  machineId: string;
+  machine: Pick<Machine, "id" | "assetCode" | "name" | "location" | "operatorId">;
+  providerId: string | null;
+  provider: WorkOrderProvider | null;
+  approvedByOperatorId: string | null;
+  approvedByOperator: Pick<User, "id" | "name" | "email"> | null;
+  title: string;
+  description: string | null;
+  status: WorkOrderStatus;
+  scheduledDate: string | null;
+  completedDate: string | null;
+  cost: number | string | null;
+  notes: string | null;
+  replacedParts: string | null;
+  evidence: ServiceEvidence[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkOrderInput = {
+  machineId: string;
+  title: string;
+  description?: string | null;
+  scheduledDate?: string | null;
+  cost?: number | null;
+  notes?: string | null;
+  replacedParts?: string | null;
+};
+
+export type ServiceEvidenceInput = {
+  type: EvidenceType;
+  fileName: string;
+  fileUrl?: string | null;
+  notes?: string | null;
+};
+
+export type WorkOrderServiceDetailsInput = {
+  completedDate?: string | null;
+  cost?: number | null;
+  replacedParts?: string | null;
+  notes?: string | null;
+};
+
 export type UserInput = {
   name: string;
   email: string;
@@ -297,4 +365,75 @@ export function acknowledgeAlert(id: string) {
 
 export function runAlertScheduler() {
   return apiRequest<{ result: AlertSchedulerResult }>("/alerts/run-scheduler", { method: "POST" });
+}
+
+export function getWorkOrders() {
+  return apiRequest<{ workOrders: WorkOrder[] }>("/work-orders");
+}
+
+export function getWorkOrder(id: string) {
+  return apiRequest<{ workOrder: WorkOrder }>(`/work-orders/${id}`);
+}
+
+export function getWorkOrderProviders() {
+  return apiRequest<{ providers: WorkOrderProvider[] }>("/work-orders/providers");
+}
+
+export function createWorkOrder(input: WorkOrderInput) {
+  return apiRequest<{ workOrder: WorkOrder }>("/work-orders", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateWorkOrder(id: string, input: Partial<WorkOrderInput>) {
+  return apiRequest<{ workOrder: WorkOrder }>(`/work-orders/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateWorkOrderServiceDetails(id: string, input: WorkOrderServiceDetailsInput) {
+  return apiRequest<{ workOrder: WorkOrder }>(`/work-orders/${id}/service-details`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+function runWorkOrderAction(id: string, action: string, body?: object) {
+  return apiRequest<{ workOrder: WorkOrder }>(`/work-orders/${id}/${action}`, {
+    method: "POST",
+    ...(body ? { body: JSON.stringify(body) } : {})
+  });
+}
+
+export function submitWorkOrder(id: string) {
+  return runWorkOrderAction(id, "submit");
+}
+
+export function approveWorkOrder(id: string) {
+  return runWorkOrderAction(id, "approve");
+}
+
+export function sendWorkOrderToProvider(id: string, providerId: string) {
+  return runWorkOrderAction(id, "send-to-provider", { providerId });
+}
+
+export function startWorkOrder(id: string) {
+  return runWorkOrderAction(id, "start");
+}
+
+export function completeWorkOrder(id: string) {
+  return runWorkOrderAction(id, "complete");
+}
+
+export function cancelWorkOrder(id: string) {
+  return runWorkOrderAction(id, "cancel");
+}
+
+export function addWorkOrderEvidence(id: string, input: ServiceEvidenceInput) {
+  return apiRequest<{ evidence: ServiceEvidence; workOrder?: WorkOrder }>(`/work-orders/${id}/evidence`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
 }

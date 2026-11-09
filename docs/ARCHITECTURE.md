@@ -8,67 +8,53 @@ flowchart LR
   Web --> API["Express REST API"]
   API --> Prisma["Prisma ORM"]
   Prisma --> DB["PostgreSQL"]
-  API --> Logs["Pino Logs + AuditLog"]
-  Scheduler["Startup + Daily Scheduler"] --> Prisma
+  API --> Logs["Pino + AuditLog"]
+  Scheduler["Alert Scheduler"] --> Prisma
 ```
 
 ## Components
 
 | Component | Responsibility |
 |---|---|
-| React SPA | Role dashboards, asset screens, alert list and acknowledgement controls |
-| Express API | Authentication, RBAC, CRUD, alerts, reports, and business rules |
-| Prisma ORM | Typed database access, transactions, and migrations |
-| PostgreSQL | Relational storage and the unique alert deduplication constraint |
-| Alert scheduler | Daily due-date evaluation, alert generation, and stale-alert reconciliation |
-| Audit layer | Security and business actions, including scheduler and alert lifecycle events |
-| Swagger | API contract documentation |
+| React SPA | Role-aware asset, alert, and work-order workspaces |
+| Express API | Authentication, RBAC, workflow transitions, validation, and audit orchestration |
+| Prisma ORM | Typed database access, transactions, and migration history |
+| PostgreSQL | Relational data, ownership links, workflow state, and evidence metadata |
+| Alert scheduler | Daily deadline evaluation, deduplication, and reconciliation |
+| Audit layer | Security, asset, alert, and work-order action history |
 
-## Milestone 4 Scheduler Boundary
+## Milestone 5 Workflow Boundary
 
-The scheduler remains inside the API modular monolith. It is not a separate microservice. The API starts one scheduler process at application startup and schedules subsequent runs once per day while that API process remains active. The default daily time is 01:00 in `Asia/Colombo`; `ALERT_SCHEDULER_HOUR` and `ALERT_SCHEDULER_TIMEZONE` configure it.
-
-The same scheduler service is called by both automatic execution and `POST /api/alerts/run-scheduler`. The route adds Admin/Manager authorization and a user actor; it does not duplicate deadline logic.
+Work orders remain inside the API modular monolith. Transition rules live in the work-order service, not in the React UI. Each transition reads the current record, verifies the authenticated role and relationship, performs the state update, and creates its audit record in one database transaction.
 
 ```mermaid
 flowchart TD
-  Trigger["Startup, daily timer, or manual run"] --> Evaluate["Evaluate four due-date sources"]
-  Evaluate --> Upsert["Generate alerts by unique dedupeKey"]
-  Upsert --> Reconcile["Resolve stale alerts"]
-  Reconcile --> Audit["Write scheduler and lifecycle audit actions"]
+  Manage["Management draft and submit"] --> Operator["Assigned operator approval"]
+  Operator --> Dispatch["Management provider selection"]
+  Dispatch --> Service["Assigned provider service"]
+  Service --> Review["Management review"]
 ```
 
-## Deadline Evaluation
+## Authorization Boundary
 
-| Source | Alert type | Warning threshold |
-|---|---|---|
-| `Machine.warrantyEnd` | `MACHINE_WARRANTY` | 7 days by default |
-| `MachinePart.warrantyEnd` | `PART_WARRANTY` | 7 days by default |
-| `MachinePart.replacementDue` | `PART_REPLACEMENT` | 7 days by default |
-| `MaintenancePlan.nextDueDate` | `MAINTENANCE_DUE` | The plan's `thresholdDays` value |
-
-Only `ACTIVE` and `UNDER_MAINTENANCE` machines participate. Parts and plans inherit that machine eligibility. Only active maintenance plans are evaluated, and optional machine/part dates are skipped when absent.
-
-## Idempotency and Reconciliation
-
-Each due event has a deterministic `dedupeKey` derived from its alert type, source record, and due event. `Alert.dedupeKey` is unique in PostgreSQL, so repeated, overlapping, or manually triggered runs cannot create a second alert for the same event.
-
-After generation, the scheduler reconciles existing active alerts against current source data. If the source no longer qualifies because its date changed, its date was cleared, its maintenance plan became inactive, or its machine is no longer alertable, the alert changes to `RESOLVED` and receives `resolvedAt`. A changed due date is treated as a new due event, allowing a new dedupe key when it becomes eligible. If the exact same due event later qualifies again, its existing resolved alert is reopened instead of duplicated.
-
-## API and Authorization Boundary
-
-| Endpoint | Authorization behavior |
+| Actor | Backend scope |
 |---|---|
-| `GET /api/alerts` | Admin, Owner, and Manager receive all alerts; Machine Operator receives assigned-machine alerts; Service Provider is denied |
-| `PATCH /api/alerts/:alertId/acknowledge` | The same visibility rules are enforced before acknowledgement |
-| `POST /api/alerts/run-scheduler` | Admin and Manager only |
+| Admin, Owner, Manager | All work orders; management mutations and dispatch |
+| Machine Operator | Work orders for assigned machines; approval only while pending |
+| Service Provider | Assigned orders after approval; start, service details, evidence, completion |
 
-All role filtering is enforced by the Express API. Frontend visibility is only a usability layer.
+Providers cannot discover drafts or pending approvals. Operators cannot approve a work order for a machine assigned to someone else. Provider assignment occurs during the approved-to-dispatched transition.
+
+## State Rules
+
+The normal path is `DRAFT -> PENDING_OPERATOR_APPROVAL -> APPROVED -> SENT_TO_PROVIDER -> IN_PROGRESS -> COMPLETED`. Management can cancel any nonterminal order. Draft editing is restricted to management; provider service details are accepted only for assigned dispatched or in-progress work.
+
+Evidence rows are append-only in Milestone 5. They store type, file name, optional URL, notes, uploader, and timestamp. Binary upload storage, evidence replacement, and evidence deletion are deferred.
 
 ## Audit Boundary
 
-The scheduler and alert routes create `ALERT_GENERATED`, `ALERT_RESOLVED`, `ALERT_ACKNOWLEDGED`, and `ALERT_SCHEDULER_RUN` records. Automatic scheduler actions may use a null actor; manual scheduler runs and acknowledgements use the authenticated actor.
+Milestone 5 records `WORK_ORDER_CREATED`, `WORK_ORDER_UPDATED`, `WORK_ORDER_SUBMITTED`, `WORK_ORDER_APPROVED`, `WORK_ORDER_SENT_TO_PROVIDER`, `WORK_ORDER_STARTED`, `WORK_ORDER_COMPLETED`, `WORK_ORDER_CANCELLED`, `WORK_ORDER_SERVICE_DETAILS_UPDATED`, and `SERVICE_EVIDENCE_ADDED`.
 
 ## Architecture Decision
 
-The project uses a modular monolith, not microservices. This keeps the prototype realistic for a three-member university team while separating frontend, API, scheduler, reporting, and database responsibilities. Milestone 4 does not require an external queue, hosted cron service, or messaging provider.
+The project remains a modular monolith rather than adding a queue or separate work-order service. This keeps transactional authorization and audit behavior clear for the prototype while preserving module boundaries for later extraction if needed.

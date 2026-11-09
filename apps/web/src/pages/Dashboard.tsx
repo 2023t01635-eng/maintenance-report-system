@@ -2,6 +2,7 @@ import { AlertTriangle, Boxes, ClipboardList, Database, LayoutDashboard, LogOut,
 import { useEffect, useState, type FormEvent } from "react";
 import { AssetWorkspace } from "./AssetWorkspace";
 import { AlertWorkspace } from "./AlertWorkspace";
+import { WorkOrderWorkspace } from "./WorkOrderWorkspace";
 import {
   createUser,
   getDashboardSummary,
@@ -29,7 +30,7 @@ type DashboardProps = {
 };
 
 export function Dashboard({ user, onLoggedOut }: DashboardProps) {
-  const [activeView, setActiveView] = useState<"overview" | "assets" | "alerts">("overview");
+  const [activeView, setActiveView] = useState<"overview" | "assets" | "alerts" | "work-orders">("overview");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
@@ -108,10 +109,13 @@ export function Dashboard({ user, onLoggedOut }: DashboardProps) {
             </button>
           </>
         )}
+        <button className={activeView === "work-orders" ? "active" : ""} type="button" onClick={() => setActiveView("work-orders")} aria-current={activeView === "work-orders" ? "page" : undefined}>
+          <ClipboardList aria-hidden="true" /> Work Orders
+        </button>
       </nav>
 
       <section className="dashboard-content">
-        {activeView === "assets" && user.role !== "SERVICE_PROVIDER" ? <AssetWorkspace user={user} /> : activeView === "alerts" && user.role !== "SERVICE_PROVIDER" ? <AlertWorkspace user={user} /> : <>
+        {activeView === "assets" && user.role !== "SERVICE_PROVIDER" ? <AssetWorkspace user={user} /> : activeView === "alerts" && user.role !== "SERVICE_PROVIDER" ? <AlertWorkspace user={user} /> : activeView === "work-orders" ? <WorkOrderWorkspace user={user} /> : <>
           <div className="welcome-row">
           <div>
             <p className="eyebrow">{roleLabels[user.role]} workspace</p>

@@ -4,40 +4,30 @@ Use this workflow when asking Codex to continue the Maintenance Report System.
 
 ## Milestone Flow
 
-1. Project Lead reads the milestone, confirms scope, and assigns non-overlapping file areas.
-2. Database/API Agent implements validation, business rules, routes, audit events, scheduler lifecycle, and backend tests.
-3. Frontend Agent implements API services, alert screens, loading/empty/error states, responsive behavior, and frontend tests.
-4. QA Agent reviews RBAC, time-boundary behavior, deduplication, reconciliation, and regressions, then runs the integrated verification commands.
-5. Docs/Demo Agent updates `README.md` and `docs/**` without claiming unobserved test results.
-6. Project Lead resolves findings, records observed results, reviews the diff, and creates the local commit.
+1. Project Lead reads the source handoff, confirms scope, and assigns non-overlapping file areas.
+2. Database/API Agent implements validation, service rules, routes, transactions, audit events, migrations, and backend tests.
+3. Frontend Agent implements the API client, role-aware workspace, complete UI states, responsive behavior, and frontend tests.
+4. QA Agent reviews RBAC, transition validity, relationship scope, regressions, and integrated verification.
+5. Docs/Demo Agent updates `README.md` and `docs/**` using only observed results.
+6. Project Lead resolves findings, packages the source, and leaves Git unchanged unless the user requests a commit.
 
-## Milestone 4 Ownership
+## Milestone 5 Ownership
 
-| Agent | Milestone 4 responsibility |
+| Agent | Responsibility |
 |---|---|
-| Database/API | Alert service/routes, four due-date evaluators, unique-key handling, reconciliation, acknowledgement, startup/daily scheduling, audit events, API tests |
-| Frontend | Role-scoped alert list, status display, acknowledgement, Admin/Manager manual-run control, responsive states, UI tests |
-| QA | Clock-boundary tests, repeated/concurrent run checks, stale resolution, endpoint RBAC, startup/daily lifecycle, Milestone 3 regression verification |
-| Docs/Demo | Exact endpoint contract, role matrix, Windows/Docker demo, migration note, pending QA record |
-| Project Lead | Integration decisions, final verification, observed result recording, local commit/push |
-
-Maintenance-plan CRUD belongs to the Milestone 3 baseline. Milestone 4 must reuse it and must not rebuild or describe it as a new database feature.
+| Database/API | Work-order state machine, operator/provider scope, service details, evidence metadata, audit, migration, tests |
+| Frontend | Work-order list/detail, create/edit, approval, dispatch, provider workflow, evidence, responsive states, tests |
+| QA | Endpoint RBAC, invalid transitions, provider isolation, URL validation, M1-M4 regressions |
+| Docs/Demo | Endpoint contract, role matrix, migration, Windows demo, pending manual checks |
+| Project Lead | Integration decisions, full verification, package integrity, delivery |
 
 ## Integration Contract
 
-The API/frontend contract is:
+The status path is `DRAFT -> PENDING_OPERATOR_APPROVAL -> APPROVED -> SENT_TO_PROVIDER -> IN_PROGRESS -> COMPLETED`. Management can cancel a nonterminal order.
 
-- `GET /api/alerts`
-- `PATCH /api/alerts/:alertId/acknowledge`
-- `POST /api/alerts/run-scheduler` for Admin and Manager
-
-The scheduler service is shared by startup, daily, and manual triggers. It evaluates machine warranty, part warranty, and part replacement with a 7-day default threshold; maintenance plans use their own `thresholdDays`.
-
-Every run must be idempotent through `Alert.dedupeKey` and must reconcile stale alerts. Required audit actions are `ALERT_GENERATED`, `ALERT_RESOLVED`, `ALERT_ACKNOWLEDGED`, and `ALERT_SCHEDULER_RUN`.
+The assigned operator is the only user who can approve a pending order. Management sends an approved order with `{ providerId }`. Only that provider can start, update service details, add evidence, and complete it. Providers never receive draft or pending records.
 
 ## Verification Handoff
-
-The Docs/Demo Agent leaves all Milestone 4 observed results as `Pending - Project Lead`. Only the person who runs the integrated commands records pass/fail counts.
 
 ```powershell
 npm run prisma:generate
@@ -46,33 +36,19 @@ npm test
 npm run build
 ```
 
-The Project Lead also completes the Windows/Docker checklist in `docs/MILESTONE_4_QA.md`. No Prisma migration is expected because the initial schema already contains the Alert model, enums, relationships, indexes, and unique dedupe key.
+The Project Lead records actual counts and completes `docs/MILESTONE_5_QA.md`. Milestone 5 includes a real Prisma migration and local Windows installation must run `npm run prisma:migrate`.
 
 ## Review Gates
 
-- Scheduler date tests use a controlled clock and consistent date boundaries.
-- Repeated and overlapping runs cannot create duplicate alerts.
-- Reconciliation resolves stale open and acknowledged alerts.
-- Operator alert queries are scoped by assigned machine in the backend.
-- Service Provider access is denied until approved work-order scope is implemented.
-- Manual scheduler execution is restricted to Admin and Manager.
-- Automatic startup and daily runs do not register duplicate timers.
-- Audit details distinguish automatic and manual scheduler execution.
-- Milestone 3 asset behavior remains unchanged.
+- State transitions enforce both current status and authenticated relationship.
+- Provider assignment is selected only after operator approval.
+- Provider list queries cannot reveal unassigned work.
+- Operators cannot approve work for another operator's machine.
+- Service details and evidence are provider-only and linked to the assigned order.
+- Evidence URL validation rejects unsafe schemes.
+- Successful mutations create the expected audit action.
+- Milestones 1 through 4 remain green.
 
 ## Local Desktop Remote
 
-The project uses a local bare Git repository instead of a hosted remote.
-
-```powershell
-Set-Location "C:\Users\Malith pamuditha\Desktop\maintenance-report-system"
-
-git remote set-url origin "C:\Users\Malith pamuditha\Desktop\maintenance-report-system-local-remote.git"
-git status
-git diff --check
-git add -A
-git commit -m "feat: add alert scheduler and acknowledgement"
-git push origin main
-```
-
-The Project Lead must inspect the diff and verification results before committing. Use a normal current-time commit; do not backdate or fabricate Git history.
+The project uses a local bare Git repository instead of a hosted remote. The Project Lead inspects the diff and verification results before any requested commit. Use the real current time; never backdate or fabricate Git history.
