@@ -1,6 +1,7 @@
 import { AlertTriangle, Boxes, ClipboardList, Database, LayoutDashboard, LogOut, ShieldCheck, Users, Wrench } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { AssetWorkspace } from "./AssetWorkspace";
+import { AlertWorkspace } from "./AlertWorkspace";
 import {
   createUser,
   getDashboardSummary,
@@ -28,7 +29,7 @@ type DashboardProps = {
 };
 
 export function Dashboard({ user, onLoggedOut }: DashboardProps) {
-  const [activeView, setActiveView] = useState<"overview" | "assets">("overview");
+  const [activeView, setActiveView] = useState<"overview" | "assets" | "alerts">("overview");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
@@ -98,14 +99,19 @@ export function Dashboard({ user, onLoggedOut }: DashboardProps) {
           <LayoutDashboard aria-hidden="true" /> Overview
         </button>
         {user.role !== "SERVICE_PROVIDER" && (
-          <button className={activeView === "assets" ? "active" : ""} type="button" onClick={() => setActiveView("assets")} aria-current={activeView === "assets" ? "page" : undefined}>
-            <Boxes aria-hidden="true" /> Assets
-          </button>
+          <>
+            <button className={activeView === "assets" ? "active" : ""} type="button" onClick={() => setActiveView("assets")} aria-current={activeView === "assets" ? "page" : undefined}>
+              <Boxes aria-hidden="true" /> Assets
+            </button>
+            <button className={activeView === "alerts" ? "active" : ""} type="button" onClick={() => setActiveView("alerts")} aria-current={activeView === "alerts" ? "page" : undefined}>
+              <AlertTriangle aria-hidden="true" /> Alerts
+            </button>
+          </>
         )}
       </nav>
 
       <section className="dashboard-content">
-        {activeView === "assets" && user.role !== "SERVICE_PROVIDER" ? <AssetWorkspace user={user} /> : <>
+        {activeView === "assets" && user.role !== "SERVICE_PROVIDER" ? <AssetWorkspace user={user} /> : activeView === "alerts" && user.role !== "SERVICE_PROVIDER" ? <AlertWorkspace user={user} /> : <>
           <div className="welcome-row">
           <div>
             <p className="eyebrow">{roleLabels[user.role]} workspace</p>

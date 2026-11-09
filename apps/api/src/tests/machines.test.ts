@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => {
     user: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     machine: {
       create: vi.fn(),
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
@@ -327,7 +328,7 @@ describe("Milestone 3 machine API", () => {
   it("rejects nested creation when the parent machine is missing", async () => {
     const user = actor(Role.OWNER);
     mocks.prisma.user.findUnique.mockResolvedValue(user);
-    mocks.tx.machine.findUnique.mockResolvedValue(null);
+    mocks.tx.machine.findFirst.mockResolvedValue(null);
 
     const response = await request(app)
       .post(`/api/machines/${machineId}/parts`)
@@ -343,7 +344,7 @@ describe("Milestone 3 machine API", () => {
     mocks.prisma.user.findUnique.mockResolvedValue(user);
     mocks.prisma.machine.findFirst.mockResolvedValue({ id: machineId });
     mocks.prisma.machinePart.findMany.mockResolvedValue([part]);
-    mocks.tx.machine.findUnique.mockResolvedValue({ id: machineId });
+    mocks.tx.machine.findFirst.mockResolvedValue({ id: machineId });
     mocks.tx.machinePart.create.mockResolvedValue(part);
     mocks.tx.machinePart.findFirst.mockResolvedValue(part);
     mocks.tx.machinePart.delete.mockResolvedValue(part);
@@ -441,7 +442,7 @@ describe("Milestone 3 machine API", () => {
   it("creates a valid maintenance plan with an atomic audit event", async () => {
     const user = actor(Role.ADMIN);
     mocks.prisma.user.findUnique.mockResolvedValue(user);
-    mocks.tx.machine.findUnique.mockResolvedValue({ id: machineId });
+    mocks.tx.machine.findFirst.mockResolvedValue({ id: machineId });
     mocks.tx.maintenancePlan.create.mockResolvedValue(plan);
 
     const response = await request(app)
@@ -454,6 +455,64 @@ describe("Milestone 3 machine API", () => {
     expect(mocks.tx.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: "MAINTENANCE_PLAN_CREATED", entityId: planId }) })
     );
+  });
+
+  it("allows operators to create plans only for their assigned machines", async () => {
+    const user = actor(Role.MACHINE_OPERATOR, operatorId);
+    mocks.prisma.user.findUnique.mockResolvedValue(user);
+    mocks.tx.machine.findFirst
+      .mockResolvedValueOnce({ id: machineId })
+      .mockResolvedValueOnce(null);
+    mocks.tx.maintenancePlan.create.mockResolvedValue(plan);
+
+    const assigned = await request(app)
+      .post(`/api/machines/${machineId}/plans`)
+      .set("Authorization", bearer(user))
+      .send({ title: "Monthly inspection", frequency: "MONTHLY", nextDueDate: "2026-12-01" });
+    const unassigned = await request(app)
+      .post("/api/machines/other-machine/plans")
+      .set("Authorization", bearer(user))
+      .send({ title: "Monthly inspection", frequency: "MONTHLY", nextDueDate: "2026-12-01" });
+
+    expect(assigned.status).toBe(201);
+    expect(unassigned.status).toBe(404);
+    expect(mocks.tx.machine.findFirst).toHaveBeenNthCalledWith(1, {
+      where: { id: machineId, operatorId },
+      select: { id: true }
+    });
+    expect(mocks.tx.machine.findFirst).toHaveBeenNthCalledWith(2, {
+      where: { id: "other-machine", operatorId },
+      select: { id: true }
+    });
+    expect(mocks.tx.maintenancePlan.create).toHaveBeenCalledOnce();
+  });
+
+  it("accepts calendar dates only and rejects timestamps", async () => {
+    const user = actor(Role.ADMIN);
+    mocks.prisma.user.findUnique.mockResolvedValue(user);
+
+    const machineResponse = await request(app)
+      .post("/api/machines")
+      .set("Authorization", bearer(user))
+      .send({
+        assetCode: "LAB-004",
+        name: "Pump",
+        category: "Utilities",
+        location: "Plant room",
+        warrantyEnd: "2026-12-01T18:00:00Z"
+      });
+    const planResponse = await request(app)
+      .post(`/api/machines/${machineId}/plans`)
+      .set("Authorization", bearer(user))
+      .send({
+        title: "Monthly inspection",
+        frequency: "MONTHLY",
+        nextDueDate: "2026-12-01T18:00:00Z"
+      });
+
+    expect(machineResponse.status).toBe(400);
+    expect(planResponse.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("lists and updates a maintenance plan scoped to its parent", async () => {

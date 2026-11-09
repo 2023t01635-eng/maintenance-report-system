@@ -8,6 +8,7 @@ import { logger } from "./lib/logger.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { notFound } from "./middleware/notFound.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
+import { alertsRouter } from "./modules/alerts/alerts.routes.js";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { machinePartsRouter } from "./modules/machines/machineParts.routes.js";
@@ -39,6 +40,7 @@ app.get("/api", (_req, res) => {
 
 app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/alerts", alertsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/operators", operatorsRouter);

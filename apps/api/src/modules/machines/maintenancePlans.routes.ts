@@ -7,7 +7,7 @@ import {
   deleteMaintenancePlan,
   listMaintenancePlans,
   machineReadRoles,
-  machineWriteRoles,
+  maintenancePlanWriteRoles,
   nestedDeleteRoles,
   updateMaintenancePlan
 } from "./machines.service.js";
@@ -20,7 +20,7 @@ maintenancePlansRouter.get("/", requireRoles(...machineReadRoles), async (req, r
   res.json({ plans: await listMaintenancePlans(routeParam(req.params.machineId), req.user!) });
 });
 
-maintenancePlansRouter.post("/", requireRoles(...machineWriteRoles), async (req, res) => {
+maintenancePlansRouter.post("/", requireRoles(...maintenancePlanWriteRoles), async (req, res) => {
   const plan = await createMaintenancePlan(
     routeParam(req.params.machineId),
     createMaintenancePlanSchema.parse(req.body),
@@ -30,7 +30,7 @@ maintenancePlansRouter.post("/", requireRoles(...machineWriteRoles), async (req,
   res.status(201).json({ plan });
 });
 
-maintenancePlansRouter.patch("/:planId", requireRoles(...machineWriteRoles), async (req, res) => {
+maintenancePlansRouter.patch("/:planId", requireRoles(...maintenancePlanWriteRoles), async (req, res) => {
   const plan = await updateMaintenancePlan(
     routeParam(req.params.machineId),
     routeParam(req.params.planId),

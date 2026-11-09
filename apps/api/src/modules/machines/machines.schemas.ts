@@ -9,16 +9,17 @@ const optionalText = (max: number) =>
     .transform((value) => (value === "" ? null : value))
     .optional();
 
-const optionalDate = z
-  .union([
-    z
-      .string()
-      .trim()
-      .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid date")
-      .transform((value) => new Date(value)),
-    z.null()
-  ])
-  .optional();
+const calendarDate = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+  .refine((value) => {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }, "Invalid calendar date")
+  .transform((value) => new Date(`${value}T00:00:00.000Z`));
+
+const optionalDate = z.union([calendarDate, z.null()]).optional();
 
 const assetCode = requiredText(50).transform((value) => value.toUpperCase());
 
@@ -83,11 +84,7 @@ const planFields = {
   description: optionalText(2_000),
   frequency: z.nativeEnum(MaintenanceFrequency),
   intervalDays: z.union([z.coerce.number().int().min(1).max(3_650), z.null()]).optional(),
-  nextDueDate: z
-    .string()
-    .trim()
-    .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid date")
-    .transform((value) => new Date(value)),
+  nextDueDate: calendarDate,
   thresholdDays: z.coerce.number().int().min(0).max(365).optional(),
   isActive: z.boolean().optional()
 };

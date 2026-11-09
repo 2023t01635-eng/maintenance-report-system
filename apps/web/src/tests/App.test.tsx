@@ -45,6 +45,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: /User management/i })).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Assets" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Alerts" })).toBeInTheDocument();
   });
 
   it("does not expose the asset workspace to service providers", async () => {
@@ -61,5 +62,6 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: /Maintenance overview/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Assets" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Alerts" })).not.toBeInTheDocument();
   });
 });

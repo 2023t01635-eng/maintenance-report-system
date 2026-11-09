@@ -9,7 +9,20 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1).default("postgresql://maintenance_user:maintenance_password@localhost:5432/maintenance_db?schema=public"),
   JWT_SECRET: z.string().min(32).default("dev-only-secret-change-before-final-demo-123456"),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
-  LOG_LEVEL: z.string().default("info")
+  LOG_LEVEL: z.string().default("info"),
+  ALERT_SCHEDULER_HOUR: z.coerce.number().int().min(0).max(23).default(1),
+  ALERT_SCHEDULER_TIMEZONE: z
+    .string()
+    .min(1)
+    .refine((value) => {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+        return true;
+      } catch {
+        return false;
+      }
+    }, "Invalid IANA timezone")
+    .default("Asia/Colombo")
 });
 
 export const env = envSchema.parse(process.env);

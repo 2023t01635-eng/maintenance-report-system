@@ -157,14 +157,15 @@ describe("AssetWorkspace", () => {
     expect(screen.getByRole("button", { name: "Delete plan Monthly lubrication" })).toBeInTheDocument();
   });
 
-  it("keeps machine operators read-only", async () => {
+  it("keeps operator asset records read-only while allowing assigned maintenance plans", async () => {
     const fetchMock = await renderFor("MACHINE_OPERATOR");
 
-    expect(screen.getByText(/Read-only access to machines assigned to you/i)).toBeInTheDocument();
+    expect(screen.getByText(/Manage maintenance plans for assigned machines/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add machine" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit machine" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add part" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add plan" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add plan" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit plan Monthly lubrication" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/operators"))).toBe(false);
   });
 
@@ -176,6 +177,8 @@ describe("AssetWorkspace", () => {
     fireEvent.change(screen.getByLabelText("Machine name"), { target: { value: "CNC Router" } });
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Fabrication" } });
     fireEvent.change(screen.getByLabelText("Location"), { target: { value: "Digital Lab" } });
+    fireEvent.change(screen.getByLabelText("Warranty start"), { target: { value: "2026-11-09" } });
+    fireEvent.change(screen.getByLabelText("Warranty end"), { target: { value: "2027-11-09" } });
     fireEvent.change(screen.getByLabelText("Assigned operator"), { target: { value: operator.id } });
     fireEvent.click(screen.getByRole("button", { name: "Save record" }));
 
@@ -185,6 +188,8 @@ describe("AssetWorkspace", () => {
       assetCode: "M-003",
       name: "CNC Router",
       location: "Digital Lab",
+      warrantyStart: "2026-11-09",
+      warrantyEnd: "2027-11-09",
       operatorId: operator.id
     });
   });

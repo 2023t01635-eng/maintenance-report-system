@@ -14,6 +14,7 @@ import type {
 
 export const machineReadRoles = [Role.ADMIN, Role.OWNER, Role.MANAGER, Role.MACHINE_OPERATOR];
 export const machineWriteRoles = [Role.ADMIN, Role.OWNER, Role.MANAGER];
+export const maintenancePlanWriteRoles = [...machineWriteRoles, Role.MACHINE_OPERATOR];
 export const nestedDeleteRoles = [Role.ADMIN, Role.MANAGER];
 
 const operatorSelect = {
@@ -233,7 +234,7 @@ export async function createMachinePart(
 ) {
   assertDateRange(input.warrantyStart, input.warrantyEnd);
   return prisma.$transaction(async (tx) => {
-    if (!(await tx.machine.findUnique({ where: { id: machineId }, select: { id: true } }))) {
+    if (!(await tx.machine.findFirst({ where: visibleMachineWhere(actor, machineId), select: { id: true } }))) {
       throw new HttpError(404, "Machine not found");
     }
     const part = await tx.machinePart.create({ data: { machineId, ...partData(input) } as Prisma.MachinePartUncheckedCreateInput });
@@ -296,7 +297,7 @@ export async function createMaintenancePlan(
 ) {
   assertPlanFrequency(input.frequency, input.intervalDays);
   return prisma.$transaction(async (tx) => {
-    if (!(await tx.machine.findUnique({ where: { id: machineId }, select: { id: true } }))) {
+    if (!(await tx.machine.findFirst({ where: visibleMachineWhere(actor, machineId), select: { id: true } }))) {
       throw new HttpError(404, "Machine not found");
     }
     const plan = await tx.maintenancePlan.create({
@@ -317,7 +318,13 @@ export async function updateMaintenancePlan(
   ipAddress?: string
 ) {
   return prisma.$transaction(async (tx) => {
-    const current = await tx.maintenancePlan.findFirst({ where: { id: planId, machineId } });
+    const current = await tx.maintenancePlan.findFirst({
+      where: {
+        id: planId,
+        machineId,
+        ...(actor.role === Role.MACHINE_OPERATOR ? { machine: { operatorId: actor.id } } : {})
+      }
+    });
     if (!current) {
       throw new HttpError(404, "Maintenance plan not found");
     }

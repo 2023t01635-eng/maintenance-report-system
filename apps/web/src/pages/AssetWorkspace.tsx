@@ -127,7 +127,7 @@ function dateInputValue(value: string | null | undefined) {
 }
 
 function apiDate(value: string) {
-  return value ? `${value}T00:00:00.000Z` : null;
+  return value || null;
 }
 
 function displayDate(value: string | null | undefined) {
@@ -234,7 +234,8 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
   const [partEditor, setPartEditor] = useState<PartEditor | null>(null);
   const [planEditor, setPlanEditor] = useState<PlanEditor | null>(null);
 
-  const canManage = user.role === "ADMIN" || user.role === "OWNER" || user.role === "MANAGER";
+  const canManageAssets = user.role === "ADMIN" || user.role === "OWNER" || user.role === "MANAGER";
+  const canManagePlans = canManageAssets || user.role === "MACHINE_OPERATOR";
   const canDeleteMachine = user.role === "ADMIN";
   const canDeleteNested = user.role === "ADMIN" || user.role === "MANAGER";
 
@@ -244,7 +245,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
     try {
       const requests: [ReturnType<typeof getMachines>, Promise<{ operators: Operator[] }> | null] = [
         getMachines(),
-        canManage ? getOperators() : null
+        canManageAssets ? getOperators() : null
       ];
       const [machineResponse, operatorResponse] = await Promise.all([
         requests[0],
@@ -442,7 +443,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
           <button className="secondary-button button-with-icon" type="button" onClick={() => void loadMachines()} disabled={loadingList}>
             <RefreshCw aria-hidden="true" /> Refresh
           </button>
-          {canManage && (
+          {canManageAssets && (
             <button className="primary-button button-with-icon" type="button" onClick={() => setMachineEditor({ mode: "create", draft: emptyMachineDraft() })}>
               <Plus aria-hidden="true" /> Add machine
             </button>
@@ -451,7 +452,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
       </div>
 
       {user.role === "MACHINE_OPERATOR" && (
-        <p className="permission-note"><ShieldCheck aria-hidden="true" /> Read-only access to machines assigned to you.</p>
+        <p className="permission-note"><ShieldCheck aria-hidden="true" /> Manage maintenance plans for assigned machines; asset and part records are read-only.</p>
       )}
       {error && <p className="form-error workspace-error" role="alert">{error}</p>}
 
@@ -467,7 +468,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
           {loadingList ? (
             <div className="workspace-state"><span className="loading-mark small" />Loading machines...</div>
           ) : visibleMachines.length === 0 ? (
-            <div className="workspace-state"><Database aria-hidden="true" /><strong>{machines.length ? "No matching machines" : "No machines yet"}</strong><span>{machines.length ? "Try a different search." : canManage ? "Add the first machine to begin." : "No assigned records are available."}</span></div>
+            <div className="workspace-state"><Database aria-hidden="true" /><strong>{machines.length ? "No matching machines" : "No machines yet"}</strong><span>{machines.length ? "Try a different search." : canManageAssets ? "Add the first machine to begin." : "No assigned records are available."}</span></div>
           ) : (
             <div className="machine-list">
               {visibleMachines.map((machine) => (
@@ -500,7 +501,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
                   <h2>{selectedMachine.name}</h2>
                   <p>{selectedMachine.category}</p>
                 </div>
-                {canManage && (
+                {canManageAssets && (
                   <div className="row-actions">
                     <button className="secondary-button button-with-icon" type="button" onClick={() => setMachineEditor({ mode: "edit", machineId: selectedMachine.id, draft: machineDraft(selectedMachine) })}>
                       <Pencil aria-hidden="true" /> Edit machine
@@ -526,19 +527,19 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
               <section className="record-section" aria-labelledby="parts-heading">
                 <div className="section-heading compact">
                   <div><p className="eyebrow">Inventory</p><h3 id="parts-heading">Machine parts</h3></div>
-                  {canManage && <button className="secondary-button button-with-icon" type="button" onClick={() => setPartEditor({ mode: "create", draft: emptyPartDraft() })}><Plus aria-hidden="true" /> Add part</button>}
+                  {canManageAssets && <button className="secondary-button button-with-icon" type="button" onClick={() => setPartEditor({ mode: "create", draft: emptyPartDraft() })}><Plus aria-hidden="true" /> Add part</button>}
                 </div>
                 {parts.length === 0 ? (
                   <div className="empty-row"><Package aria-hidden="true" /><span>No parts recorded for this machine.</span></div>
                 ) : (
                   <div className="data-table-wrap">
                     <table className="data-table">
-                      <thead><tr><th>Part</th><th>Quantity</th><th>Warranty end</th><th>Replacement due</th>{canManage && <th><span className="sr-only">Actions</span></th>}</tr></thead>
+                      <thead><tr><th>Part</th><th>Quantity</th><th>Warranty end</th><th>Replacement due</th>{canManageAssets && <th><span className="sr-only">Actions</span></th>}</tr></thead>
                       <tbody>{parts.map((part) => (
                         <tr key={part.id}>
                           <td><strong>{part.name}</strong><span>{part.partNumber ?? "No part number"}</span></td>
                           <td>{part.quantity}</td><td>{displayDate(part.warrantyEnd)}</td><td>{displayDate(part.replacementDue)}</td>
-                          {canManage && <td><div className="table-actions"><button className="table-icon-button" type="button" onClick={() => setPartEditor({ mode: "edit", partId: part.id, draft: partDraft(part) })} aria-label={`Edit part ${part.name}`} title="Edit part"><Pencil aria-hidden="true" /></button>{canDeleteNested && <button className="table-icon-button danger" type="button" onClick={() => void removePart(part)} aria-label={`Delete part ${part.name}`} title="Delete part"><Trash2 aria-hidden="true" /></button>}</div></td>}
+                          {canManageAssets && <td><div className="table-actions"><button className="table-icon-button" type="button" onClick={() => setPartEditor({ mode: "edit", partId: part.id, draft: partDraft(part) })} aria-label={`Edit part ${part.name}`} title="Edit part"><Pencil aria-hidden="true" /></button>{canDeleteNested && <button className="table-icon-button danger" type="button" onClick={() => void removePart(part)} aria-label={`Delete part ${part.name}`} title="Delete part"><Trash2 aria-hidden="true" /></button>}</div></td>}
                         </tr>
                       ))}</tbody>
                     </table>
@@ -549,7 +550,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
               <section className="record-section" aria-labelledby="plans-heading">
                 <div className="section-heading compact">
                   <div><p className="eyebrow">Schedule</p><h3 id="plans-heading">Maintenance plans</h3></div>
-                  {canManage && <button className="secondary-button button-with-icon" type="button" onClick={() => setPlanEditor({ mode: "create", draft: emptyPlanDraft() })}><Plus aria-hidden="true" /> Add plan</button>}
+                  {canManagePlans && <button className="secondary-button button-with-icon" type="button" onClick={() => setPlanEditor({ mode: "create", draft: emptyPlanDraft() })}><Plus aria-hidden="true" /> Add plan</button>}
                 </div>
                 {plans.length === 0 ? (
                   <div className="empty-row"><CalendarClock aria-hidden="true" /><span>No maintenance plans recorded.</span></div>
@@ -558,7 +559,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
                     <article className="plan-row" key={plan.id}>
                       <div className="plan-date"><span>Next due</span><strong>{displayDate(plan.nextDueDate)}</strong></div>
                       <div className="plan-main"><div><strong>{plan.title}</strong><span className={plan.isActive ? "status-active" : "status-inactive"}>{plan.isActive ? "Active" : "Paused"}</span></div><p>{frequencyLabels[plan.frequency]}{plan.frequency === "CUSTOM" && plan.intervalDays ? `, every ${plan.intervalDays} days` : ""} · Alert {plan.thresholdDays} days before</p>{plan.description && <span>{plan.description}</span>}</div>
-                      {canManage && <div className="table-actions"><button className="table-icon-button" type="button" onClick={() => setPlanEditor({ mode: "edit", planId: plan.id, draft: planDraft(plan) })} aria-label={`Edit plan ${plan.title}`} title="Edit plan"><Pencil aria-hidden="true" /></button>{canDeleteNested && <button className="table-icon-button danger" type="button" onClick={() => void removePlan(plan)} aria-label={`Delete plan ${plan.title}`} title="Delete plan"><Trash2 aria-hidden="true" /></button>}</div>}
+                      {canManagePlans && <div className="table-actions"><button className="table-icon-button" type="button" onClick={() => setPlanEditor({ mode: "edit", planId: plan.id, draft: planDraft(plan) })} aria-label={`Edit plan ${plan.title}`} title="Edit plan"><Pencil aria-hidden="true" /></button>{canDeleteNested && <button className="table-icon-button danger" type="button" onClick={() => void removePlan(plan)} aria-label={`Delete plan ${plan.title}`} title="Delete plan"><Trash2 aria-hidden="true" /></button>}</div>}
                     </article>
                   ))}</div>
                 )}

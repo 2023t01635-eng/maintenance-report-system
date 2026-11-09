@@ -104,6 +104,36 @@ export type MaintenancePlanInput = {
   isActive: boolean;
 };
 
+export type AlertType = "MACHINE_WARRANTY" | "PART_WARRANTY" | "PART_REPLACEMENT" | "MAINTENANCE_DUE";
+export type AlertStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+
+export type MaintenanceAlert = {
+  id: string;
+  type: AlertType;
+  status: AlertStatus;
+  dueDate: string;
+  message: string;
+  acknowledgedAt: string | null;
+  createdAt: string;
+  machine: Pick<Machine, "id" | "assetCode" | "name" | "location" | "operatorId">;
+  part: Pick<MachinePart, "id" | "name" | "partNumber"> | null;
+  plan: Pick<MaintenancePlan, "id" | "title"> | null;
+};
+
+export type AlertSummary = {
+  open: number;
+  acknowledged: number;
+  overdue: number;
+  dueSoon: number;
+};
+
+export type AlertSchedulerResult = {
+  created: number;
+  existing: number;
+  resolved: number;
+  evaluatedAt: string;
+};
+
 export type UserInput = {
   name: string;
   email: string;
@@ -255,4 +285,16 @@ export function updateMaintenancePlan(machineId: string, planId: string, input: 
 
 export function deleteMaintenancePlan(machineId: string, planId: string) {
   return apiRequest<void>(`/machines/${machineId}/plans/${planId}`, { method: "DELETE" });
+}
+
+export function getAlerts() {
+  return apiRequest<{ alerts: MaintenanceAlert[]; summary: AlertSummary }>("/alerts");
+}
+
+export function acknowledgeAlert(id: string) {
+  return apiRequest<{ alert: MaintenanceAlert }>(`/alerts/${id}/acknowledge`, { method: "PATCH" });
+}
+
+export function runAlertScheduler() {
+  return apiRequest<{ result: AlertSchedulerResult }>("/alerts/run-scheduler", { method: "POST" });
 }
