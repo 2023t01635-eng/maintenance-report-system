@@ -1,12 +1,16 @@
-import { EvidenceType, Role, WorkOrderStatus } from "@prisma/client";
+import { AlertStatus, AlertType, Role, WorkOrderCategory, WorkOrderPriority, WorkOrderStatus } from "@prisma/client";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const tx = {
     machine: { findUnique: vi.fn() },
+    machinePart: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
     user: { findFirst: vi.fn() },
-    workOrder: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    alert: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), upsert: vi.fn() },
+    workOrder: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+    workOrderReplacement: { create: vi.fn(), findFirst: vi.fn(), delete: vi.fn(), update: vi.fn() },
+    workOrderPriceCounter: { create: vi.fn(), updateMany: vi.fn() },
     serviceEvidence: { create: vi.fn() },
     auditLog: { create: vi.fn() }
   };
@@ -17,7 +21,7 @@ const mocks = vi.hoisted(() => {
     machine: { count: vi.fn() },
     alert: { count: vi.fn() }
   };
-  return { prisma, tx };
+  return { tx, prisma };
 });
 
 vi.mock("../lib/prisma.js", () => ({ prisma: mocks.prisma }));
@@ -25,19 +29,20 @@ vi.mock("../lib/prisma.js", () => ({ prisma: mocks.prisma }));
 import { app } from "../app.js";
 import { createAuthToken } from "../modules/auth/auth.service.js";
 
-const adminId = "11111111-1111-4111-8111-111111111111";
-const providerId = "22222222-2222-4222-8222-222222222222";
-const otherProviderId = "33333333-3333-4333-8333-333333333333";
-const operatorId = "44444444-4444-4444-8444-444444444444";
-const machineId = "55555555-5555-4555-8555-555555555555";
-const workOrderId = "66666666-6666-4666-8666-666666666666";
-const evidenceId = "77777777-7777-4777-8777-777777777777";
+const machineId = "11111111-1111-4111-8111-111111111111";
+const operatorId = "22222222-2222-4222-8222-222222222222";
+const providerId = "33333333-3333-4333-8333-333333333333";
+const managerId = "44444444-4444-4444-8444-444444444444";
+const workOrderId = "55555555-5555-4555-8555-555555555555";
+const alertId = "66666666-6666-4666-8666-666666666666";
+const replacementId = "77777777-7777-4777-8777-777777777777";
+const partId = "88888888-8888-4888-8888-888888888888";
 
-function actor(role: Role, id = `${role.toLowerCase()}-1`) {
+function actor(role: Role, id: string) {
   return {
     id,
     name: role,
-    email: `${id}@example.com`,
+    email: `${role.toLowerCase()}@example.com`,
     passwordHash: "hash",
     role,
     isActive: true,
@@ -52,538 +57,529 @@ function bearer(user: ReturnType<typeof actor>) {
 
 const operator = actor(Role.MACHINE_OPERATOR, operatorId);
 const provider = actor(Role.SERVICE_PROVIDER, providerId);
-const otherProvider = actor(Role.SERVICE_PROVIDER, otherProviderId);
-const admin = actor(Role.ADMIN, adminId);
+const manager = actor(Role.MANAGER, managerId);
 
-function workOrder(status: WorkOrderStatus, overrides: Record<string, unknown> = {}) {
+function loadedWorkOrder(status: WorkOrderStatus, overrides: Record<string, unknown> = {}) {
   return {
     id: workOrderId,
     machineId,
-    providerId,
-    approvedByOperatorId: status === WorkOrderStatus.DRAFT ? null : operatorId,
-    title: "Replace spindle bearing",
-    description: "Bearing noise exceeds normal limit",
+    providerId: status === WorkOrderStatus.DRAFT || status === WorkOrderStatus.PENDING_MANAGEMENT_APPROVAL ? null : providerId,
+    approvedByOperatorId: null,
+    createdById: operatorId,
+    sourceAlertId: alertId,
+    managementApprovedById: null,
+    managementApprovedAt: null,
+    paymentApprovedById: null,
+    paymentApprovedAt: null,
+    paymentReference: null,
+    providerBusinessName: null,
+    providerAddress: null,
+    providerRegistrationNumber: null,
+    providerContact: null,
+    invoiceNumber: null,
+    title: "Replace drive belt",
+    description: "Belt replacement alert",
+    category: WorkOrderCategory.PART_REPLACEMENT,
+    priority: WorkOrderPriority.HIGH,
     status,
-    scheduledDate: new Date("2026-11-15T00:00:00.000Z"),
+    scheduledDate: null,
+    providerAcceptedAt: null,
+    completionSubmittedAt: null,
     completedDate: null,
-    cost: 12500,
-    replacedParts: "Spindle bearing",
+    proposedBudget: null,
+    serviceCost: null,
     notes: null,
+    replacedParts: null,
+    rejectionReason: null,
     createdAt: new Date("2026-11-10T00:00:00.000Z"),
     updatedAt: new Date("2026-11-10T00:00:00.000Z"),
     machine: {
       id: machineId,
       assetCode: "LAB-001",
-      name: "CNC Lathe",
+      name: "Lathe",
+      category: "Machine tool",
       location: "Lab A",
+      status: "ACTIVE",
       operatorId,
-      operator
+      operator: null
     },
-    provider,
-    approvedByOperator: operator,
+    provider: null,
+    approvedByOperator: null,
+    createdBy: null,
+    managementApprovedBy: null,
+    paymentApprovedBy: null,
+    sourceAlert: null,
+    replacements: [],
     evidence: [],
+    paymentApprovalAlert: null,
+    priceCounterOffers: [],
     ...overrides
   };
 }
 
-function authenticate(user: ReturnType<typeof actor>) {
-  mocks.prisma.user.findUnique.mockResolvedValue(user);
-  return bearer(user);
-}
-
-function expectAudit(action: string) {
-  expect(mocks.tx.auditLog.create).toHaveBeenCalledWith({
-    data: expect.objectContaining({ action, actorId: expect.any(String), entityId: workOrderId })
-  });
-}
-
-describe("Milestone 5 work orders", () => {
+describe("Milestone 5.5 service workflow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.prisma.$transaction.mockImplementation(
       async (callback: (tx: typeof mocks.tx) => Promise<unknown>) => callback(mocks.tx)
     );
     mocks.tx.auditLog.create.mockResolvedValue({});
-    mocks.tx.machine.findUnique.mockResolvedValue({ id: machineId });
-    mocks.tx.user.findFirst.mockResolvedValue({ id: providerId });
   });
 
-  it("requires authentication and limits draft creation to management roles", async () => {
-    expect((await request(app).get("/api/work-orders")).status).toBe(401);
+  it("requires authentication and allows operators, but not providers, to create requests", async () => {
+    expect((await request(app).post("/api/work-orders")).status).toBe(401);
 
-    const token = authenticate(operator);
-    const response = await request(app)
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
+    const forbidden = await request(app)
       .post("/api/work-orders")
-      .set("Authorization", token)
-      .send({ machineId, title: "Repair" });
-    expect(response.status).toBe(403);
-    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+      .set("Authorization", bearer(provider))
+      .send({ machineId, title: "Provider draft" });
+    expect(forbidden.status).toBe(403);
+
+    mocks.prisma.user.findUnique.mockResolvedValue(operator);
+    mocks.tx.machine.findUnique.mockResolvedValue({ id: machineId, operatorId });
+    mocks.tx.workOrder.create.mockResolvedValue(loadedWorkOrder(WorkOrderStatus.DRAFT));
+    const created = await request(app)
+      .post("/api/work-orders")
+      .set("Authorization", bearer(operator))
+      .send({ machineId, title: "Replace drive belt", category: "PART_REPLACEMENT", priority: "HIGH" });
+
+    expect(created.status).toBe(201);
+    expect(mocks.tx.workOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ createdById: operatorId, status: WorkOrderStatus.DRAFT })
+    }));
   });
 
-  it("applies management, operator, and provider visibility scopes", async () => {
+  it("applies role-specific visibility to the request register", async () => {
     mocks.prisma.workOrder.findMany.mockResolvedValue([]);
 
-    await request(app).get("/api/work-orders").set("Authorization", authenticate(admin));
-    expect(mocks.prisma.workOrder.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: {} }));
+    mocks.prisma.user.findUnique.mockResolvedValue(operator);
+    await request(app).get("/api/work-orders").set("Authorization", bearer(operator));
+    expect(mocks.prisma.workOrder.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { OR: [{ machine: { operatorId } }, { createdById: operatorId }] }
+    }));
 
-    await request(app).get("/api/work-orders").set("Authorization", authenticate(operator));
-    expect(mocks.prisma.workOrder.findMany).toHaveBeenLastCalledWith(
-      expect.objectContaining({ where: { machine: { operatorId } } })
-    );
-
-    await request(app).get("/api/work-orders").set("Authorization", authenticate(provider));
-    expect(mocks.prisma.workOrder.findMany).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        where: {
-          providerId,
-          status: {
-            in: [
-              WorkOrderStatus.APPROVED,
-              WorkOrderStatus.SENT_TO_PROVIDER,
-              WorkOrderStatus.IN_PROGRESS,
-              WorkOrderStatus.COMPLETED
-            ]
-          }
-        }
-      })
-    );
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
+    await request(app).get("/api/work-orders").set("Authorization", bearer(provider));
+    expect(mocks.prisma.workOrder.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ providerId })
+    }));
   });
 
-  it("returns 404 when a role-scoped detail query cannot see an order", async () => {
-    mocks.prisma.workOrder.findFirst.mockResolvedValue(null);
-    const response = await request(app)
-      .get(`/api/work-orders/${workOrderId}`)
-      .set("Authorization", authenticate(provider));
-    expect(response.status).toBe(404);
-    expect(mocks.prisma.workOrder.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ id: workOrderId, providerId })
-      })
-    );
-  });
-
-  it("returns included evidence to the assigned machine operator", async () => {
-    const visible = workOrder(WorkOrderStatus.IN_PROGRESS, {
-      evidence: [{ id: evidenceId, type: EvidenceType.PHOTO, fileName: "bearing.jpg" }]
+  it("links an operator request to a visible alert and prevents duplicate active requests", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue(operator);
+    mocks.tx.machine.findUnique.mockResolvedValue({ id: machineId, operatorId });
+    mocks.tx.alert.findUnique.mockResolvedValue({
+      id: alertId,
+      machineId,
+      status: AlertStatus.OPEN,
+      type: AlertType.PART_REPLACEMENT
     });
-    mocks.prisma.workOrder.findFirst.mockResolvedValue(visible);
-    const response = await request(app)
-      .get(`/api/work-orders/${workOrderId}`)
-      .set("Authorization", authenticate(operator));
-    expect(response.status).toBe(200);
-    expect(response.body.workOrder.evidence).toEqual([
-      { id: evidenceId, type: EvidenceType.PHOTO, fileName: "bearing.jpg" }
-    ]);
-    expect(mocks.prisma.workOrder.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: workOrderId, machine: { operatorId } } })
-    );
-  });
+    mocks.tx.workOrder.findFirst.mockResolvedValue({ id: "existing" });
 
-  it("lists only active service providers for management", async () => {
-    mocks.prisma.user.findMany.mockResolvedValue([provider]);
-    const allowed = await request(app).get("/api/work-orders/providers").set("Authorization", authenticate(admin));
-    expect(allowed.status).toBe(200);
-    expect(allowed.body.providers).toHaveLength(1);
-    expect(mocks.prisma.user.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { role: Role.SERVICE_PROVIDER, isActive: true } })
-    );
-
-    const blocked = await request(app)
-      .get("/api/work-orders/providers")
-      .set("Authorization", authenticate(provider));
-    expect(blocked.status).toBe(403);
-  });
-
-  it("creates a draft with planned service data and audits the mutation", async () => {
-    const created = workOrder(WorkOrderStatus.DRAFT);
-    mocks.tx.workOrder.create.mockResolvedValue(created);
     const response = await request(app)
       .post("/api/work-orders")
-      .set("Authorization", authenticate(admin))
-      .send({
-        machineId,
-        providerId,
-        title: "Replace spindle bearing",
-        scheduledDate: "2026-11-15",
-        cost: 12500,
-        replacedParts: "Spindle bearing",
-        notes: "Shut down machine first"
-      });
+      .set("Authorization", bearer(operator))
+      .send({ machineId, sourceAlertId: alertId, title: "Duplicate request", category: "PART_REPLACEMENT" });
 
-    expect(response.status).toBe(201);
-    expect(response.body).toHaveProperty("workOrder.id", workOrderId);
-    expect(mocks.tx.workOrder.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          machineId,
-          providerId,
-          scheduledDate: new Date("2026-11-15T00:00:00.000Z"),
-          cost: 12500,
-          replacedParts: "Spindle bearing"
-        })
-      })
-    );
-    expectAudit("WORK_ORDER_CREATED");
+    expect(response.status).toBe(409);
+    expect(response.body.message).toContain("already has an active work order");
+    expect(mocks.tx.workOrder.create).not.toHaveBeenCalled();
   });
 
-  it("rejects invalid dates, negative costs, missing machines, and inactive providers", async () => {
-    const token = authenticate(admin);
-    expect(
-      (
-        await request(app)
-          .post("/api/work-orders")
-          .set("Authorization", token)
-          .send({ machineId, title: "Repair", scheduledDate: "11/15/2026" })
-      ).status
-    ).toBe(400);
-    expect(
-      (
-        await request(app)
-          .post("/api/work-orders")
-          .set("Authorization", token)
-          .send({ machineId, title: "Repair", cost: -1 })
-      ).status
-    ).toBe(400);
+  it("submits an operator draft for management approval", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue(operator);
+    mocks.tx.workOrder.findUnique.mockResolvedValue(loadedWorkOrder(WorkOrderStatus.DRAFT));
+    mocks.tx.workOrder.update.mockResolvedValue(loadedWorkOrder(WorkOrderStatus.PENDING_MANAGEMENT_APPROVAL));
 
-    mocks.tx.machine.findUnique.mockResolvedValueOnce(null);
-    expect(
-      (await request(app).post("/api/work-orders").set("Authorization", token).send({ machineId, title: "Repair" }))
-        .status
-    ).toBe(400);
-
-    mocks.tx.user.findFirst.mockResolvedValueOnce(null);
-    expect(
-      (
-        await request(app)
-          .post("/api/work-orders")
-          .set("Authorization", token)
-          .send({ machineId, providerId, title: "Repair" })
-      ).status
-    ).toBe(400);
-  });
-
-  it("updates only draft fields and records replaced parts in the audit-backed update", async () => {
-    const current = workOrder(WorkOrderStatus.DRAFT);
-    mocks.tx.workOrder.findUnique.mockResolvedValue(current);
-    mocks.tx.workOrder.update.mockResolvedValue({ ...current, replacedParts: "Bearing, oil seal" });
-    const response = await request(app)
-      .patch(`/api/work-orders/${workOrderId}`)
-      .set("Authorization", authenticate(admin))
-      .send({ replacedParts: "Bearing, oil seal", cost: 15000 });
-    expect(response.status).toBe(200);
-    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { replacedParts: "Bearing, oil seal", cost: 15000 } })
-    );
-    expectAudit("WORK_ORDER_UPDATED");
-
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.APPROVED));
-    expect(
-      (
-        await request(app)
-          .patch(`/api/work-orders/${workOrderId}`)
-          .set("Authorization", authenticate(admin))
-          .send({ title: "Changed" })
-      ).status
-    ).toBe(409);
-  });
-
-  it("submits a draft only when its machine has an active assigned operator", async () => {
-    const current = workOrder(WorkOrderStatus.DRAFT);
-    mocks.tx.workOrder.findUnique.mockResolvedValue(current);
-    mocks.tx.workOrder.update.mockResolvedValue(workOrder(WorkOrderStatus.PENDING_OPERATOR_APPROVAL));
     const response = await request(app)
       .post(`/api/work-orders/${workOrderId}/submit`)
-      .set("Authorization", authenticate(admin));
+      .set("Authorization", bearer(operator));
+
     expect(response.status).toBe(200);
-    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: WorkOrderStatus.PENDING_OPERATOR_APPROVAL }) })
-    );
-    expectAudit("WORK_ORDER_SUBMITTED");
-
-    mocks.tx.workOrder.findUnique.mockResolvedValue(
-      workOrder(WorkOrderStatus.DRAFT, { machine: { ...current.machine, operator: null, operatorId: null } })
-    );
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/submit`)
-          .set("Authorization", authenticate(admin))
-      ).status
-    ).toBe(400);
+    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: WorkOrderStatus.PENDING_MANAGEMENT_APPROVAL })
+    }));
   });
 
-  it("allows only the assigned operator to approve a pending order", async () => {
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.PENDING_OPERATOR_APPROVAL));
-    mocks.tx.workOrder.update.mockResolvedValue(workOrder(WorkOrderStatus.APPROVED));
-    const approved = await request(app)
-      .post(`/api/work-orders/${workOrderId}/approve`)
-      .set("Authorization", authenticate(operator));
-    expect(approved.status).toBe(200);
-    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: WorkOrderStatus.APPROVED, approvedByOperatorId: operatorId })
-      })
-    );
-    expectAudit("WORK_ORDER_APPROVED");
+  it("lets management approve and dispatch only to an active provider", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue(manager);
+    mocks.tx.workOrder.findUnique.mockResolvedValue(loadedWorkOrder(WorkOrderStatus.PENDING_MANAGEMENT_APPROVAL));
+    mocks.tx.user.findFirst.mockResolvedValue({ id: providerId });
+    mocks.tx.workOrder.update.mockResolvedValue(loadedWorkOrder(WorkOrderStatus.SENT_TO_PROVIDER, { providerId }));
 
-    const differentOperator = actor(Role.MACHINE_OPERATOR, "88888888-8888-4888-8888-888888888888");
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/approve`)
-          .set("Authorization", authenticate(differentOperator))
-      ).status
-    ).toBe(403);
-  });
-
-  it("returns 409 for an invalid operator transition", async () => {
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.DRAFT));
     const response = await request(app)
-      .post(`/api/work-orders/${workOrderId}/approve`)
-      .set("Authorization", authenticate(operator));
-    expect(response.status).toBe(409);
-    expect(mocks.tx.workOrder.update).not.toHaveBeenCalled();
-  });
+      .post(`/api/work-orders/${workOrderId}/approve-and-dispatch`)
+      .set("Authorization", bearer(manager))
+      .send({ providerId, proposedBudget: 20000 });
 
-  it("sends an approved order only to an active assigned provider", async () => {
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.APPROVED));
-    mocks.tx.workOrder.update.mockResolvedValue(workOrder(WorkOrderStatus.SENT_TO_PROVIDER));
-    const sent = await request(app)
-      .post(`/api/work-orders/${workOrderId}/send-to-provider`)
-      .set("Authorization", authenticate(admin))
-      .send({ providerId });
-    expect(sent.status).toBe(200);
-    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: WorkOrderStatus.SENT_TO_PROVIDER, providerId })
+    expect(response.status).toBe(200);
+    expect(mocks.tx.user.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: providerId, role: Role.SERVICE_PROVIDER, isActive: true }
+    }));
+    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        providerId,
+        proposedBudget: 20000,
+        managementApprovedById: managerId,
+        status: WorkOrderStatus.SENT_TO_PROVIDER
       })
-    );
-    expectAudit("WORK_ORDER_SENT_TO_PROVIDER");
-
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/send-to-provider`)
-          .set("Authorization", authenticate(admin))
-          .send({})
-      ).status
-    ).toBe(400);
-
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.APPROVED));
-    mocks.tx.user.findFirst.mockResolvedValueOnce(null);
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/send-to-provider`)
-          .set("Authorization", authenticate(admin))
-          .send({ providerId })
-      ).status
-    ).toBe(400);
+    }));
   });
 
-  it("isolates provider-owned start and completion transitions", async () => {
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.SENT_TO_PROVIDER));
-    mocks.tx.workOrder.update.mockResolvedValue(workOrder(WorkOrderStatus.IN_PROGRESS));
+  it("requires provider acceptance before starting service", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
+    mocks.tx.workOrder.findUnique.mockResolvedValueOnce(
+      loadedWorkOrder(WorkOrderStatus.SENT_TO_PROVIDER, { providerId })
+    );
+    mocks.tx.workOrder.update.mockResolvedValueOnce(
+      loadedWorkOrder(WorkOrderStatus.PROVIDER_ACCEPTED, { providerId })
+    );
+    const accepted = await request(app)
+      .post(`/api/work-orders/${workOrderId}/accept`)
+      .set("Authorization", bearer(provider));
+    expect(accepted.status).toBe(200);
+
+    mocks.tx.workOrder.findUnique.mockResolvedValueOnce(
+      loadedWorkOrder(WorkOrderStatus.PROVIDER_ACCEPTED, { providerId })
+    );
+    mocks.tx.workOrder.update.mockResolvedValueOnce(
+      loadedWorkOrder(WorkOrderStatus.IN_PROGRESS, { providerId })
+    );
     const started = await request(app)
       .post(`/api/work-orders/${workOrderId}/start`)
-      .set("Authorization", authenticate(provider));
+      .set("Authorization", bearer(provider));
     expect(started.status).toBe(200);
-    expectAudit("WORK_ORDER_STARTED");
+    expect(mocks.tx.workOrder.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: WorkOrderStatus.IN_PROGRESS })
+    }));
+  });
 
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/start`)
-          .set("Authorization", authenticate(otherProvider))
-      ).status
-    ).toBe(403);
-
-    expect(
-      (
-        await request(app)
-          .patch(`/api/work-orders/${workOrderId}/service-details`)
-          .set("Authorization", authenticate(admin))
-          .send({ cost: 10 })
-      ).status
-    ).toBe(403);
-
-    const recordedDate = new Date("2026-11-18T00:00:00.000Z");
+  it("stores provider receipt identity with the service report", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
     mocks.tx.workOrder.findUnique.mockResolvedValue(
-      workOrder(WorkOrderStatus.IN_PROGRESS, { completedDate: recordedDate })
+      loadedWorkOrder(WorkOrderStatus.IN_PROGRESS, { providerId })
     );
     mocks.tx.workOrder.update.mockResolvedValue(
-      workOrder(WorkOrderStatus.COMPLETED, { completedDate: recordedDate })
-    );
-    const completed = await request(app)
-      .post(`/api/work-orders/${workOrderId}/complete`)
-      .set("Authorization", authenticate(provider));
-    expect(completed.status).toBe(200);
-    expect(mocks.tx.workOrder.update).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: WorkOrderStatus.COMPLETED, completedDate: recordedDate })
+      loadedWorkOrder(WorkOrderStatus.IN_PROGRESS, {
+        providerId,
+        providerBusinessName: "Reliable Engineering (Pvt) Ltd",
+        providerAddress: "45 Industrial Road, Colombo",
+        providerRegistrationNumber: "PV-102030",
+        providerContact: "+94 11 555 0199",
+        invoiceNumber: "INV-2026-041"
       })
     );
-    expectAudit("WORK_ORDER_COMPLETED");
-  });
 
-  it("defaults the completed service date when the provider did not record one", async () => {
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.IN_PROGRESS));
-    mocks.tx.workOrder.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
-      ...workOrder(WorkOrderStatus.COMPLETED),
-      ...data
-    }));
-    const response = await request(app)
-      .post(`/api/work-orders/${workOrderId}/complete`)
-      .set("Authorization", authenticate(provider));
-    expect(response.status).toBe(200);
-    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: WorkOrderStatus.COMPLETED, completedDate: expect.any(Date) })
-      })
-    );
-  });
-
-  it("lets the assigned provider record service-only fields", async () => {
-    const current = workOrder(WorkOrderStatus.IN_PROGRESS);
-    mocks.tx.workOrder.findUnique.mockResolvedValue(current);
-    mocks.tx.workOrder.update.mockResolvedValue({
-      ...current,
-      completedDate: new Date("2026-11-18T00:00:00.000Z"),
-      cost: 18000,
-      replacedParts: "Bearing, oil seal",
-      notes: "Tested at full speed"
-    });
     const response = await request(app)
       .patch(`/api/work-orders/${workOrderId}/service-details`)
-      .set("Authorization", authenticate(provider))
+      .set("Authorization", bearer(provider))
       .send({
-        completedDate: "2026-11-18",
-        cost: 18000,
-        replacedParts: "Bearing, oil seal",
-        notes: "Tested at full speed"
+        completedDate: "2026-11-19",
+        serviceCost: 12500,
+        notes: "Spindle serviced and tested.",
+        providerBusinessName: "Reliable Engineering (Pvt) Ltd",
+        providerAddress: "45 Industrial Road, Colombo",
+        providerRegistrationNumber: "PV-102030",
+        providerContact: "+94 11 555 0199",
+        invoiceNumber: "INV-2026-041"
       });
+
     expect(response.status).toBe(200);
-    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: {
-          completedDate: new Date("2026-11-18T00:00:00.000Z"),
-          cost: 18000,
-          replacedParts: "Bearing, oil seal",
-          notes: "Tested at full speed"
-        }
+    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        providerBusinessName: "Reliable Engineering (Pvt) Ltd",
+        providerAddress: "45 Industrial Road, Colombo",
+        providerRegistrationNumber: "PV-102030",
+        providerContact: "+94 11 555 0199",
+        invoiceNumber: "INV-2026-041",
+        serviceCost: 12500
+      })
+    }));
+    expect(mocks.tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ action: "WORK_ORDER_SERVICE_DETAILS_UPDATED" })
+    }));
+  });
+
+  it("records replacement warranty dates for the assigned provider", async () => {
+    const replacement = {
+      id: replacementId,
+      workOrderId,
+      machinePartId: partId,
+      partName: "Drive belt",
+      partNumber: "DB-20",
+      quantity: 1,
+      unitCost: 5000,
+      warrantyStart: new Date("2026-11-10T00:00:00.000Z"),
+      warrantyEnd: new Date("2027-11-10T00:00:00.000Z"),
+      nextReplacementDate: new Date("2027-10-10T00:00:00.000Z"),
+      notes: null
+    };
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
+    mocks.tx.workOrder.findUnique.mockResolvedValue(loadedWorkOrder(WorkOrderStatus.IN_PROGRESS, {
+      providerId,
+      proposedBudget: 20000,
+      serviceCost: 10000
+    }));
+    mocks.tx.machinePart.findFirst.mockResolvedValue({ id: partId });
+    mocks.tx.workOrderReplacement.create.mockResolvedValue(replacement);
+
+    const response = await request(app)
+      .post(`/api/work-orders/${workOrderId}/replacements`)
+      .set("Authorization", bearer(provider))
+      .send({
+        machinePartId: partId,
+        partName: "Drive belt",
+        partNumber: "DB-20",
+        quantity: 1,
+        unitCost: 5000,
+        warrantyStart: "2026-11-10",
+        warrantyEnd: "2027-11-10",
+        nextReplacementDate: "2027-10-10"
+      });
+
+    expect(response.status).toBe(201);
+    expect(mocks.tx.workOrderReplacement.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ workOrderId, machinePartId: partId, partName: "Drive belt" })
+    }));
+  });
+
+  it("submits provider completion and creates a management payment alert", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
+    mocks.tx.workOrder.findUnique.mockResolvedValue(loadedWorkOrder(WorkOrderStatus.IN_PROGRESS, {
+      providerId,
+      proposedBudget: 20000,
+      serviceCost: 10000
+    }));
+    mocks.tx.alert.upsert.mockResolvedValue({ id: alertId });
+    mocks.tx.workOrder.update.mockResolvedValue(
+      loadedWorkOrder(WorkOrderStatus.AWAITING_PAYMENT_APPROVAL, {
+        providerId,
+        proposedBudget: 20000,
+        serviceCost: 10000,
+        completedDate: new Date()
       })
     );
-    expectAudit("WORK_ORDER_SERVICE_DETAILS_UPDATED");
-  });
 
-  it("blocks unassigned providers and invalid service-detail states or values", async () => {
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.IN_PROGRESS));
-    expect(
-      (
-        await request(app)
-          .patch(`/api/work-orders/${workOrderId}/service-details`)
-          .set("Authorization", authenticate(otherProvider))
-          .send({ cost: 10 })
-      ).status
-    ).toBe(403);
-
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/evidence`)
-          .set("Authorization", authenticate(provider))
-          .send({ type: EvidenceType.PHOTO, fileName: "photo.jpg", fileUrl: "javascript:alert(1)" })
-      ).status
-    ).toBe(400);
-
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.COMPLETED));
-    expect(
-      (
-        await request(app)
-          .patch(`/api/work-orders/${workOrderId}/service-details`)
-          .set("Authorization", authenticate(provider))
-          .send({ notes: "Late edit" })
-      ).status
-    ).toBe(409);
-
-    expect(
-      (
-        await request(app)
-          .patch(`/api/work-orders/${workOrderId}/service-details`)
-          .set("Authorization", authenticate(provider))
-          .send({ completedDate: "18-11-2026", cost: -1 })
-      ).status
-    ).toBe(400);
-  });
-
-  it("allows management to cancel nonterminal orders and rejects terminal orders", async () => {
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.IN_PROGRESS));
-    mocks.tx.workOrder.update.mockResolvedValue(workOrder(WorkOrderStatus.CANCELLED));
-    const cancelled = await request(app)
-      .post(`/api/work-orders/${workOrderId}/cancel`)
-      .set("Authorization", authenticate(admin));
-    expect(cancelled.status).toBe(200);
-    expectAudit("WORK_ORDER_CANCELLED");
-
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.COMPLETED));
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/cancel`)
-          .set("Authorization", authenticate(admin))
-      ).status
-    ).toBe(409);
-  });
-
-  it("allows only the assigned provider to add immutable evidence in service states", async () => {
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.IN_PROGRESS));
-    mocks.tx.serviceEvidence.create.mockResolvedValue({
-      id: evidenceId,
-      workOrderId,
-      type: EvidenceType.SERVICE_REPORT,
-      fileName: "service-report.pdf",
-      fileUrl: "/evidence/service-report.pdf",
-      notes: null,
-      createdAt: new Date("2026-11-18T00:00:00.000Z")
-    });
     const response = await request(app)
-      .post(`/api/work-orders/${workOrderId}/evidence`)
-      .set("Authorization", authenticate(provider))
+      .post(`/api/work-orders/${workOrderId}/submit-completion`)
+      .set("Authorization", bearer(provider));
+
+    expect(response.status).toBe(200);
+    expect(mocks.tx.alert.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        paymentWorkOrderId: workOrderId,
+        type: AlertType.PAYMENT_APPROVAL,
+        status: AlertStatus.OPEN,
+        message: expect.stringContaining("Final total: LKR 10000.00")
+      })
+    }));
+    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: WorkOrderStatus.AWAITING_PAYMENT_APPROVAL })
+    }));
+  });
+
+  it("requires complete service and part costs before provider submission", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
+    mocks.tx.workOrder.findUnique
+      .mockResolvedValueOnce(loadedWorkOrder(WorkOrderStatus.IN_PROGRESS, { providerId, serviceCost: null }))
+      .mockResolvedValueOnce(loadedWorkOrder(WorkOrderStatus.IN_PROGRESS, {
+        providerId,
+        serviceCost: 1000,
+        replacements: [{ partName: "Drive belt", quantity: 1, unitCost: null }]
+      }));
+
+    const missingServiceCost = await request(app)
+      .post(`/api/work-orders/${workOrderId}/submit-completion`)
+      .set("Authorization", bearer(provider));
+    expect(missingServiceCost.status).toBe(409);
+    expect(missingServiceCost.body.message).toContain("service or labour cost");
+
+    const missingPartCost = await request(app)
+      .post(`/api/work-orders/${workOrderId}/submit-completion`)
+      .set("Authorization", bearer(provider));
+    expect(missingPartCost.status).toBe(409);
+    expect(missingPartCost.body.message).toContain("unit cost for Drive belt");
+    expect(mocks.tx.alert.upsert).not.toHaveBeenCalled();
+  });
+
+  it("lets an owner or manager counter the provider total with a budget and message", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue(manager);
+    mocks.tx.workOrder.findUnique.mockResolvedValue(
+      loadedWorkOrder(WorkOrderStatus.AWAITING_PAYMENT_APPROVAL, {
+        proposedBudget: 12000,
+        serviceCost: 10000,
+        replacements: [{ quantity: 1, unitCost: 5000 }]
+      })
+    );
+    mocks.tx.workOrderPriceCounter.create.mockResolvedValue({ id: "counter-1" });
+    mocks.tx.alert.findUnique.mockResolvedValue({ id: alertId, status: AlertStatus.OPEN });
+    mocks.tx.alert.update.mockResolvedValue({ id: alertId, status: AlertStatus.RESOLVED });
+    mocks.tx.workOrder.update.mockResolvedValue(
+      loadedWorkOrder(WorkOrderStatus.PRICE_REVISION_REQUESTED, {
+        proposedBudget: 13500,
+        serviceCost: 10000
+      })
+    );
+
+    const response = await request(app)
+      .post(`/api/work-orders/${workOrderId}/counter-payment`)
+      .set("Authorization", bearer(manager))
+      .send({ counterBudget: 13500, reason: "Please review the labour charge and belt unit price." });
+
+    expect(response.status).toBe(200);
+    expect(mocks.tx.workOrderPriceCounter.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        workOrderId,
+        createdById: managerId,
+        counterBudget: 13500,
+        reviewedTotal: 15000,
+        reason: "Please review the labour charge and belt unit price."
+      })
+    });
+    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: WorkOrderStatus.PRICE_REVISION_REQUESTED,
+        proposedBudget: 13500
+      })
+    }));
+    expect(mocks.tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ action: "WORK_ORDER_PAYMENT_COUNTERED" })
+    }));
+  });
+
+  it("allows the provider to revise a part price and resubmit without matching the counter budget", async () => {
+    const counterOffer = {
+      id: "counter-1",
+      workOrderId,
+      createdById: managerId,
+      counterBudget: 13500,
+      reviewedTotal: 15000,
+      reason: "Review the unit price",
+      respondedAt: null,
+      createdAt: new Date(),
+      createdBy: manager
+    };
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
+    mocks.tx.workOrder.findUnique
+      .mockResolvedValueOnce(loadedWorkOrder(WorkOrderStatus.PRICE_REVISION_REQUESTED, {
+        providerId,
+        proposedBudget: 13500,
+        serviceCost: 9000,
+        priceCounterOffers: [counterOffer]
+      }))
+      .mockResolvedValueOnce(loadedWorkOrder(WorkOrderStatus.PRICE_REVISION_REQUESTED, {
+        providerId,
+        proposedBudget: 13500,
+        serviceCost: 9000,
+        replacements: [{ id: replacementId, partName: "Drive belt", quantity: 1, unitCost: 4500 }],
+        priceCounterOffers: [counterOffer]
+      }));
+    mocks.tx.workOrderReplacement.findFirst.mockResolvedValue({ id: replacementId, workOrderId });
+    mocks.tx.machinePart.findFirst.mockResolvedValue({ id: partId });
+    mocks.tx.workOrderReplacement.update.mockResolvedValue({ id: replacementId, partName: "Drive belt" });
+    mocks.tx.alert.upsert.mockResolvedValue({ id: alertId });
+    mocks.tx.workOrderPriceCounter.updateMany.mockResolvedValue({ count: 1 });
+    mocks.tx.workOrder.update.mockResolvedValue(loadedWorkOrder(WorkOrderStatus.AWAITING_PAYMENT_APPROVAL, {
+      providerId,
+      proposedBudget: 13500,
+      serviceCost: 9000
+    }));
+
+    const revised = await request(app)
+      .patch(`/api/work-orders/${workOrderId}/replacements/${replacementId}`)
+      .set("Authorization", bearer(provider))
       .send({
-        type: EvidenceType.SERVICE_REPORT,
-        fileName: "service-report.pdf",
-        fileUrl: "/evidence/service-report.pdf"
+        machinePartId: partId,
+        partName: "Drive belt",
+        partNumber: "DB-20",
+        quantity: 1,
+        unitCost: 4500,
+        warrantyStart: "2026-11-10",
+        warrantyEnd: "2027-11-10",
+        nextReplacementDate: "2027-10-10",
+        notes: "Price revised after management review"
       });
-    expect(response.status).toBe(201);
-    expect(response.body).toHaveProperty("evidence.id", evidenceId);
-    expectAudit("SERVICE_EVIDENCE_ADDED");
+    expect(revised.status).toBe(200);
+    expect(mocks.tx.workOrderReplacement.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ unitCost: 4500 })
+    }));
 
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/evidence`)
-          .set("Authorization", authenticate(admin))
-          .send({ type: EvidenceType.PHOTO, fileName: "photo.jpg" })
-      ).status
-    ).toBe(403);
+    const resubmitted = await request(app)
+      .post(`/api/work-orders/${workOrderId}/submit-completion`)
+      .set("Authorization", bearer(provider));
+    expect(resubmitted.status).toBe(200);
+    expect(mocks.tx.workOrderPriceCounter.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { workOrderId, respondedAt: null }
+    }));
+    expect(mocks.tx.workOrder.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: WorkOrderStatus.AWAITING_PAYMENT_APPROVAL })
+    }));
+  });
 
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/evidence`)
-          .set("Authorization", authenticate(otherProvider))
-          .send({ type: EvidenceType.PHOTO, fileName: "photo.jpg" })
-      ).status
-    ).toBe(403);
+  it("applies replacement dates and closes the order when management approves payment", async () => {
+    const replacement = {
+      id: replacementId,
+      machinePartId: partId,
+      partName: "Drive belt",
+      partNumber: "DB-20",
+      quantity: 1,
+      unitCost: 5000,
+      warrantyStart: new Date("2026-11-10T00:00:00.000Z"),
+      warrantyEnd: new Date("2027-11-10T00:00:00.000Z"),
+      nextReplacementDate: new Date("2027-10-10T00:00:00.000Z")
+    };
+    mocks.prisma.user.findUnique.mockResolvedValue(manager);
+    mocks.tx.workOrder.findUnique.mockResolvedValue(
+      loadedWorkOrder(WorkOrderStatus.AWAITING_PAYMENT_APPROVAL, {
+        proposedBudget: 12000,
+        serviceCost: 10000,
+        replacements: [replacement]
+      })
+    );
+    mocks.tx.machinePart.findFirst.mockResolvedValue({ id: partId });
+    mocks.tx.machinePart.update.mockResolvedValue({ id: partId });
+    mocks.tx.alert.findUnique.mockResolvedValue({ id: alertId, status: AlertStatus.OPEN });
+    mocks.tx.alert.update.mockResolvedValue({ id: alertId, status: AlertStatus.RESOLVED });
+    mocks.tx.workOrder.update.mockResolvedValue(
+      loadedWorkOrder(WorkOrderStatus.CLOSED, { paymentReference: "PAY-001" })
+    );
 
-    mocks.tx.workOrder.findUnique.mockResolvedValue(workOrder(WorkOrderStatus.APPROVED));
-    expect(
-      (
-        await request(app)
-          .post(`/api/work-orders/${workOrderId}/evidence`)
-          .set("Authorization", authenticate(provider))
-          .send({ type: EvidenceType.PHOTO, fileName: "photo.jpg" })
-      ).status
-    ).toBe(403);
+    const response = await request(app)
+      .post(`/api/work-orders/${workOrderId}/approve-payment`)
+      .set("Authorization", bearer(manager))
+      .send({ paymentReference: "PAY-001" });
+
+    expect(response.status).toBe(200);
+    expect(mocks.tx.machinePart.update).toHaveBeenCalledWith({
+      where: { id: partId },
+      data: expect.objectContaining({
+        warrantyEnd: replacement.warrantyEnd,
+        replacementDue: replacement.nextReplacementDate
+      })
+    });
+    expect(mocks.tx.alert.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: alertId },
+      data: expect.objectContaining({ status: AlertStatus.RESOLVED })
+    }));
+    expect(mocks.tx.workOrder.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: WorkOrderStatus.CLOSED,
+        paymentApprovedById: managerId,
+        paymentReference: "PAY-001"
+      })
+    }));
+    expect(mocks.tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: "WORK_ORDER_PAYMENT_APPROVED",
+        details: expect.objectContaining({
+          proposedBudget: 12000,
+          serviceCost: 10000,
+          partsTotal: 5000,
+          finalTotal: 15000,
+          budgetVariance: 3000
+        })
+      })
+    }));
   });
 });

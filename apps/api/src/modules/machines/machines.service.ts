@@ -13,8 +13,8 @@ import type {
 } from "./machines.schemas.js";
 
 export const machineReadRoles = [Role.ADMIN, Role.OWNER, Role.MANAGER, Role.MACHINE_OPERATOR];
-export const machineWriteRoles = [Role.ADMIN, Role.OWNER, Role.MANAGER];
-export const maintenancePlanWriteRoles = [...machineWriteRoles, Role.MACHINE_OPERATOR];
+export const machineWriteRoles = [Role.ADMIN, Role.OWNER, Role.MANAGER, Role.MACHINE_OPERATOR];
+export const maintenancePlanWriteRoles = machineWriteRoles;
 export const nestedDeleteRoles = [Role.ADMIN, Role.MANAGER];
 
 const operatorSelect = {
@@ -149,9 +149,10 @@ export async function createMachine(input: CreateMachineInput, actor: AuthUser, 
   assertDateRange(input.warrantyStart, input.warrantyEnd);
 
   return withSerializableTransaction(async (tx) => {
-    await assertAssignableOperator(tx, input.operatorId);
+    const operatorId = actor.role === Role.MACHINE_OPERATOR ? actor.id : input.operatorId;
+    if (actor.role !== Role.MACHINE_OPERATOR) await assertAssignableOperator(tx, input.operatorId);
     const machine = await tx.machine.create({
-      data: machineData(input),
+      data: machineData({ ...input, operatorId }),
       include: machineSummaryInclude
     });
     await tx.auditLog.create({
@@ -167,17 +168,24 @@ export async function updateMachine(id: string, input: UpdateMachineInput, actor
     if (!current) {
       throw new HttpError(404, "Machine not found");
     }
+    if (actor.role === Role.MACHINE_OPERATOR && current.operatorId !== actor.id) {
+      throw new HttpError(404, "Machine not found");
+    }
 
     const warrantyStart = input.warrantyStart === undefined ? current.warrantyStart : input.warrantyStart;
     const warrantyEnd = input.warrantyEnd === undefined ? current.warrantyEnd : input.warrantyEnd;
     assertDateRange(warrantyStart, warrantyEnd);
-    if (input.operatorId !== undefined) {
+    if (input.operatorId !== undefined && actor.role !== Role.MACHINE_OPERATOR) {
       await assertAssignableOperator(tx, input.operatorId);
     }
 
+    const safeInput = actor.role === Role.MACHINE_OPERATOR
+      ? { ...input, operatorId: undefined }
+      : input;
+
     const machine = await tx.machine.update({
       where: { id },
-      data: machineData(input),
+      data: machineData(safeInput),
       include: machineSummaryInclude
     });
     await tx.auditLog.create({
@@ -253,7 +261,13 @@ export async function updateMachinePart(
   ipAddress?: string
 ) {
   return prisma.$transaction(async (tx) => {
-    const current = await tx.machinePart.findFirst({ where: { id: partId, machineId } });
+    const current = await tx.machinePart.findFirst({
+      where: {
+        id: partId,
+        machineId,
+        ...(actor.role === Role.MACHINE_OPERATOR ? { machine: { operatorId: actor.id } } : {})
+      }
+    });
     if (!current) {
       throw new HttpError(404, "Machine part not found");
     }

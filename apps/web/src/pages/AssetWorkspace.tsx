@@ -235,6 +235,8 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
   const [planEditor, setPlanEditor] = useState<PlanEditor | null>(null);
 
   const canManageAssets = user.role === "ADMIN" || user.role === "OWNER" || user.role === "MANAGER";
+  const canCreateMachine = canManageAssets || user.role === "MACHINE_OPERATOR";
+  const canManageParts = canManageAssets || user.role === "MACHINE_OPERATOR";
   const canManagePlans = canManageAssets || user.role === "MACHINE_OPERATOR";
   const canDeleteMachine = user.role === "ADMIN";
   const canDeleteNested = user.role === "ADMIN" || user.role === "MANAGER";
@@ -328,12 +330,14 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
     setSaving(true);
     setError("");
     try {
+      const payload = machinePayload(machineEditor.draft);
+      if (user.role === "MACHINE_OPERATOR") payload.operatorId = null;
       if (machineEditor.mode === "create") {
-        const response = await createMachine(machinePayload(machineEditor.draft));
+        const response = await createMachine(payload);
         setMachineEditor(null);
         await loadMachines(response.machine.id);
       } else if (machineEditor.machineId && machineEditor.machineId === selectedId) {
-        const response = await updateMachine(machineEditor.machineId, machinePayload(machineEditor.draft));
+        const response = await updateMachine(machineEditor.machineId, payload);
         setMachines((current) => current.map((machine) => machine.id === response.machine.id ? response.machine : machine));
         setSelectedMachine(response.machine);
         setMachineEditor(null);
@@ -443,8 +447,8 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
           <button className="secondary-button button-with-icon" type="button" onClick={() => void loadMachines()} disabled={loadingList}>
             <RefreshCw aria-hidden="true" /> Refresh
           </button>
-          {canManageAssets && (
-            <button className="primary-button button-with-icon" type="button" onClick={() => setMachineEditor({ mode: "create", draft: emptyMachineDraft() })}>
+          {canCreateMachine && (
+            <button className="primary-button button-with-icon" type="button" onClick={() => setMachineEditor({ mode: "create", draft: { ...emptyMachineDraft(), operatorId: user.role === "MACHINE_OPERATOR" ? user.id : "" } })}>
               <Plus aria-hidden="true" /> Add machine
             </button>
           )}
@@ -452,7 +456,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
       </div>
 
       {user.role === "MACHINE_OPERATOR" && (
-        <p className="permission-note"><ShieldCheck aria-hidden="true" /> Manage maintenance plans for assigned machines; asset and part records are read-only.</p>
+        <p className="permission-note"><ShieldCheck aria-hidden="true" /> Register and maintain your assigned machines, parts, warranty dates, and maintenance plans. Operator assignment is automatic.</p>
       )}
       {error && <p className="form-error workspace-error" role="alert">{error}</p>}
 
@@ -468,7 +472,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
           {loadingList ? (
             <div className="workspace-state"><span className="loading-mark small" />Loading machines...</div>
           ) : visibleMachines.length === 0 ? (
-            <div className="workspace-state"><Database aria-hidden="true" /><strong>{machines.length ? "No matching machines" : "No machines yet"}</strong><span>{machines.length ? "Try a different search." : canManageAssets ? "Add the first machine to begin." : "No assigned records are available."}</span></div>
+            <div className="workspace-state"><Database aria-hidden="true" /><strong>{machines.length ? "No matching machines" : "No machines yet"}</strong><span>{machines.length ? "Try a different search." : canCreateMachine ? "Add the first machine to begin." : "No assigned records are available."}</span></div>
           ) : (
             <div className="machine-list">
               {visibleMachines.map((machine) => (
@@ -501,7 +505,7 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
                   <h2>{selectedMachine.name}</h2>
                   <p>{selectedMachine.category}</p>
                 </div>
-                {canManageAssets && (
+                {canCreateMachine && (
                   <div className="row-actions">
                     <button className="secondary-button button-with-icon" type="button" onClick={() => setMachineEditor({ mode: "edit", machineId: selectedMachine.id, draft: machineDraft(selectedMachine) })}>
                       <Pencil aria-hidden="true" /> Edit machine
@@ -527,19 +531,19 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
               <section className="record-section" aria-labelledby="parts-heading">
                 <div className="section-heading compact">
                   <div><p className="eyebrow">Inventory</p><h3 id="parts-heading">Machine parts</h3></div>
-                  {canManageAssets && <button className="secondary-button button-with-icon" type="button" onClick={() => setPartEditor({ mode: "create", draft: emptyPartDraft() })}><Plus aria-hidden="true" /> Add part</button>}
+                  {canManageParts && <button className="secondary-button button-with-icon" type="button" onClick={() => setPartEditor({ mode: "create", draft: emptyPartDraft() })}><Plus aria-hidden="true" /> Add part</button>}
                 </div>
                 {parts.length === 0 ? (
                   <div className="empty-row"><Package aria-hidden="true" /><span>No parts recorded for this machine.</span></div>
                 ) : (
                   <div className="data-table-wrap">
                     <table className="data-table">
-                      <thead><tr><th>Part</th><th>Quantity</th><th>Warranty end</th><th>Replacement due</th>{canManageAssets && <th><span className="sr-only">Actions</span></th>}</tr></thead>
+                      <thead><tr><th>Part</th><th>Quantity</th><th>Warranty end</th><th>Replacement due</th>{canManageParts && <th><span className="sr-only">Actions</span></th>}</tr></thead>
                       <tbody>{parts.map((part) => (
                         <tr key={part.id}>
                           <td><strong>{part.name}</strong><span>{part.partNumber ?? "No part number"}</span></td>
                           <td>{part.quantity}</td><td>{displayDate(part.warrantyEnd)}</td><td>{displayDate(part.replacementDue)}</td>
-                          {canManageAssets && <td><div className="table-actions"><button className="table-icon-button" type="button" onClick={() => setPartEditor({ mode: "edit", partId: part.id, draft: partDraft(part) })} aria-label={`Edit part ${part.name}`} title="Edit part"><Pencil aria-hidden="true" /></button>{canDeleteNested && <button className="table-icon-button danger" type="button" onClick={() => void removePart(part)} aria-label={`Delete part ${part.name}`} title="Delete part"><Trash2 aria-hidden="true" /></button>}</div></td>}
+                          {canManageParts && <td><div className="table-actions"><button className="table-icon-button" type="button" onClick={() => setPartEditor({ mode: "edit", partId: part.id, draft: partDraft(part) })} aria-label={`Edit part ${part.name}`} title="Edit part"><Pencil aria-hidden="true" /></button>{canDeleteNested && <button className="table-icon-button danger" type="button" onClick={() => void removePart(part)} aria-label={`Delete part ${part.name}`} title="Delete part"><Trash2 aria-hidden="true" /></button>}</div></td>}
                         </tr>
                       ))}</tbody>
                     </table>
@@ -584,7 +588,11 @@ function AssetWorkspaceContent({ user }: AssetWorkspaceProps) {
               <label>Status<select value={machineEditor.draft.status} onChange={(event) => setMachineEditor({ ...machineEditor, draft: { ...machineEditor.draft, status: event.target.value as MachineStatus } })}>{machineStatuses.map((status) => <option key={status} value={status}>{statusLabels[status]}</option>)}</select></label>
               <label>Warranty start<input type="date" value={machineEditor.draft.warrantyStart} onChange={(event) => setMachineEditor({ ...machineEditor, draft: { ...machineEditor.draft, warrantyStart: event.target.value } })} /></label>
               <label>Warranty end<input type="date" min={machineEditor.draft.warrantyStart || undefined} value={machineEditor.draft.warrantyEnd} onChange={(event) => setMachineEditor({ ...machineEditor, draft: { ...machineEditor.draft, warrantyEnd: event.target.value } })} /></label>
-              <label className="form-span">Assigned operator<select value={machineEditor.draft.operatorId ?? ""} onChange={(event) => setMachineEditor({ ...machineEditor, draft: { ...machineEditor.draft, operatorId: event.target.value } })}><option value="">Unassigned</option>{operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.name} ({operator.email})</option>)}</select></label>
+              {user.role === "MACHINE_OPERATOR" ? (
+                <label className="form-span">Assigned operator<input value={`${user.name} (automatic)`} readOnly /></label>
+              ) : (
+                <label className="form-span">Assigned operator<select value={machineEditor.draft.operatorId ?? ""} onChange={(event) => setMachineEditor({ ...machineEditor, draft: { ...machineEditor.draft, operatorId: event.target.value } })}><option value="">Unassigned</option>{operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.name} ({operator.email})</option>)}</select></label>
+              )}
             </div>
             <EditorActions saving={saving} onCancel={() => setMachineEditor(null)} />
           </form>

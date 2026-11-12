@@ -7,7 +7,12 @@ import type { AuthUser } from "../auth/auth.types.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_THRESHOLD_DAYS = 7;
-const MANAGED_ALERT_TYPES = Object.values(AlertType);
+const MANAGED_ALERT_TYPES = [
+  AlertType.MACHINE_WARRANTY,
+  AlertType.PART_WARRANTY,
+  AlertType.PART_REPLACEMENT,
+  AlertType.MAINTENANCE_DUE
+];
 const ALERT_SCHEDULER_LOCK_ID = 340_034;
 const ALERTABLE_MACHINE_STATUSES = ["ACTIVE", "UNDER_MAINTENANCE"] as const;
 
@@ -64,7 +69,9 @@ function candidateKey(type: AlertType, sourceId: string, dueDate: Date) {
 }
 
 function visibleAlertWhere(user: AuthUser): Prisma.AlertWhereInput {
-  return user.role === Role.MACHINE_OPERATOR ? { machine: { operatorId: user.id } } : {};
+  return user.role === Role.MACHINE_OPERATOR
+    ? { machine: { operatorId: user.id }, NOT: { type: AlertType.PAYMENT_APPROVAL } }
+    : {};
 }
 
 function schedulerAudit(
@@ -303,6 +310,27 @@ export async function acknowledgeAlert(id: string, actor: AuthUser, ipAddress?: 
       }, ipAddress)
     });
     return acknowledged;
+  });
+}
+
+export async function reopenAlert(id: string, actor: AuthUser, ipAddress?: string) {
+  return withSerializableTransaction(async (tx) => {
+    const alert = await tx.alert.findFirst({ where: { id, ...visibleAlertWhere(actor) }, include: alertInclude });
+    if (!alert) throw new HttpError(404, "Alert not found");
+    if (alert.status === AlertStatus.RESOLVED) throw new HttpError(409, "Resolved alerts cannot be reopened");
+    if (alert.status === AlertStatus.OPEN) return alert;
+    const reopened = await tx.alert.update({
+      where: { id },
+      data: { status: AlertStatus.OPEN, acknowledgedAt: null },
+      include: alertInclude
+    });
+    await tx.auditLog.create({
+      data: schedulerAudit(actor, "ALERT_REOPENED", id, {
+        machineId: reopened.machineId,
+        type: reopened.type
+      }, ipAddress)
+    });
+    return reopened;
   });
 }
 

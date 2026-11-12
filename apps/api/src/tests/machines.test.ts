@@ -177,17 +177,21 @@ describe("Milestone 3 machine API", () => {
     expect(detailResponse.status).toBe(404);
   });
 
-  it("forbids machine operators from asset mutations", async () => {
+  it("lets machine operators register a machine that is automatically assigned to them", async () => {
     const user = actor(Role.MACHINE_OPERATOR, operatorId);
     mocks.prisma.user.findUnique.mockResolvedValue(user);
+    mocks.tx.machine.create.mockResolvedValue({ ...machine, operatorId });
 
     const response = await request(app)
       .post("/api/machines")
       .set("Authorization", bearer(user))
       .send({ assetCode: "LAB-004", name: "Pump", category: "Utilities", location: "Plant room" });
 
-    expect(response.status).toBe(403);
-    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(response.status).toBe(201);
+    expect(mocks.tx.user.findFirst).not.toHaveBeenCalled();
+    expect(mocks.tx.machine.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ operatorId })
+    }));
   });
 
   it("creates a machine and audit record atomically after validating its operator", async () => {

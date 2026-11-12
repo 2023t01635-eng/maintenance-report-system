@@ -15,8 +15,9 @@ const mocks = vi.hoisted(() => {
     $transaction: vi.fn(),
     user: { findUnique: vi.fn(), count: vi.fn() },
     alert: { findMany: vi.fn(), count: vi.fn() },
-    machine: { count: vi.fn() },
-    workOrder: { count: vi.fn() }
+    machine: { count: vi.fn(), findMany: vi.fn() },
+    workOrder: { count: vi.fn(), findMany: vi.fn() },
+    auditLog: { findMany: vi.fn() }
   };
   return { prisma, tx };
 });
@@ -111,9 +112,133 @@ describe("Milestone 4 alerts", () => {
     expect(mocks.prisma.workOrder.count).toHaveBeenCalledWith({
       where: {
         providerId: "provider-1",
-        status: { in: ["APPROVED", "SENT_TO_PROVIDER", "IN_PROGRESS"] }
+        status: { in: ["SENT_TO_PROVIDER", "PROVIDER_ACCEPTED", "IN_PROGRESS", "PRICE_REVISION_REQUESTED", "AWAITING_PAYMENT_APPROVAL"] }
       }
     });
+  });
+
+  it("shows service providers only audit events they performed themselves", async () => {
+    const provider = actor(Role.SERVICE_PROVIDER, "provider-1");
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
+    mocks.prisma.auditLog.findMany.mockResolvedValue([]);
+
+    const response = await request(app)
+      .get("/api/dashboard/activity")
+      .set("Authorization", bearer(provider));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { actorId: "provider-1" },
+      take: 25
+    }));
+  });
+
+  it("shows machine operators only audit events they performed themselves", async () => {
+    const operator = actor(Role.MACHINE_OPERATOR, operatorId);
+    mocks.prisma.user.findUnique.mockResolvedValue(operator);
+    mocks.prisma.auditLog.findMany.mockResolvedValue([]);
+
+    const response = await request(app)
+      .get("/api/dashboard/activity")
+      .set("Authorization", bearer(operator));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { actorId: operatorId }
+    }));
+  });
+
+  it("applies the owner and manager activity hierarchy by actor role", async () => {
+    mocks.prisma.auditLog.findMany.mockResolvedValue([]);
+
+    const owner = actor(Role.OWNER, "owner-1");
+    mocks.prisma.user.findUnique.mockResolvedValueOnce(owner);
+    const ownerResponse = await request(app).get("/api/dashboard/activity").set("Authorization", bearer(owner));
+    expect(ownerResponse.status).toBe(200);
+    expect(mocks.prisma.auditLog.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: { actor: { role: { in: [Role.OWNER, Role.MANAGER, Role.MACHINE_OPERATOR] } } }
+    }));
+
+    const manager = actor(Role.MANAGER, "manager-1");
+    mocks.prisma.user.findUnique.mockResolvedValueOnce(manager);
+    const managerResponse = await request(app).get("/api/dashboard/activity").set("Authorization", bearer(manager));
+    expect(managerResponse.status).toBe(200);
+    expect(mocks.prisma.auditLog.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: { actor: { role: { in: [Role.MANAGER, Role.MACHINE_OPERATOR] } } }
+    }));
+  });
+
+  it("shows administrators the complete audit feed", async () => {
+    const admin = actor(Role.ADMIN, "admin-1");
+    mocks.prisma.user.findUnique.mockResolvedValue(admin);
+    mocks.prisma.auditLog.findMany.mockResolvedValue([]);
+
+    const response = await request(app).get("/api/dashboard/activity").set("Authorization", bearer(admin));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+  });
+
+  it("returns finalized cash inflow only for the signed-in service provider", async () => {
+    const provider = actor(Role.SERVICE_PROVIDER, "provider-1");
+    mocks.prisma.user.findUnique.mockResolvedValue(provider);
+    mocks.prisma.workOrder.findMany.mockResolvedValue([{
+      id: "work-order-1",
+      title: "Lathe service",
+      proposedBudget: 20000,
+      serviceCost: 9000,
+      completedDate: new Date("2026-11-10T00:00:00.000Z"),
+      paymentApprovedAt: new Date("2026-11-12T00:00:00.000Z"),
+      paymentReference: "PAY-001",
+      machine: { id: machineId, assetCode: "LAB-001", name: "Lathe" },
+      provider: { id: "provider-1", name: "Engineering Centre", email: "provider@example.com" },
+      paymentApprovedBy: { id: "manager-1", name: "Workshop Manager", role: Role.MANAGER },
+      replacements: [{ id: "replacement-1", partName: "Drive belt", partNumber: "DB-20", quantity: 1, unitCost: 9500 }]
+    }]);
+
+    const response = await request(app).get("/api/dashboard/payments").set("Authorization", bearer(provider));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.workOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: "CLOSED", paymentApprovedAt: { not: null }, providerId: "provider-1" }
+    }));
+    expect(response.body.direction).toBe("INFLOW");
+    expect(response.body.summary).toEqual(expect.objectContaining({
+      paymentTotal: 18500,
+      budgetTotal: 20000,
+      underBudgetAmount: 1500,
+      netVariance: -1500,
+      paymentCount: 1
+    }));
+    expect(response.body.payments[0]).toEqual(expect.objectContaining({
+      paymentValue: 18500,
+      variance: -1500,
+      approvedBy: expect.objectContaining({ name: "Workshop Manager" })
+    }));
+  });
+
+  it("returns organization-wide finalized payments as management cash outflow", async () => {
+    const manager = actor(Role.MANAGER, "manager-1");
+    mocks.prisma.user.findUnique.mockResolvedValue(manager);
+    mocks.prisma.workOrder.findMany.mockResolvedValue([]);
+
+    const response = await request(app).get("/api/dashboard/payments").set("Authorization", bearer(manager));
+
+    expect(response.status).toBe(200);
+    expect(response.body.direction).toBe("OUTFLOW");
+    expect(mocks.prisma.workOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: "CLOSED", paymentApprovedAt: { not: null } }
+    }));
+  });
+
+  it("denies the payment ledger to machine operators", async () => {
+    const operator = actor(Role.MACHINE_OPERATOR, operatorId);
+    mocks.prisma.user.findUnique.mockResolvedValue(operator);
+
+    const response = await request(app).get("/api/dashboard/payments").set("Authorization", bearer(operator));
+
+    expect(response.status).toBe(403);
+    expect(mocks.prisma.workOrder.findMany).not.toHaveBeenCalled();
   });
 
   it("applies status and type filters without removing role scope", async () => {
@@ -123,7 +248,12 @@ describe("Milestone 4 alerts", () => {
     const response = await request(app).get("/api/alerts?status=ACKNOWLEDGED&type=PART_REPLACEMENT").set("Authorization", bearer(operator));
     expect(response.status).toBe(200);
     expect(mocks.prisma.alert.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      where: { machine: { operatorId }, status: AlertStatus.ACKNOWLEDGED, type: AlertType.PART_REPLACEMENT }
+      where: {
+        machine: { operatorId },
+        NOT: { type: AlertType.PAYMENT_APPROVAL },
+        status: AlertStatus.ACKNOWLEDGED,
+        type: AlertType.PART_REPLACEMENT
+      }
     }));
   });
 
@@ -141,7 +271,9 @@ describe("Milestone 4 alerts", () => {
     mocks.tx.alert.update.mockResolvedValue({ ...alert, status: AlertStatus.ACKNOWLEDGED, acknowledgedAt: new Date() });
     const response = await request(app).patch(`/api/alerts/${alertId}/acknowledge`).set("Authorization", bearer(operator));
     expect(response.status).toBe(200);
-    expect(mocks.tx.alert.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: alertId, machine: { operatorId } } }));
+    expect(mocks.tx.alert.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: alertId, machine: { operatorId }, NOT: { type: AlertType.PAYMENT_APPROVAL } }
+    }));
     expect(mocks.tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ action: "ALERT_ACKNOWLEDGED", actorId: operatorId })
     }));
@@ -154,6 +286,26 @@ describe("Milestone 4 alerts", () => {
     const response = await request(app).patch(`/api/alerts/${alertId}/acknowledge`).set("Authorization", bearer(operator));
     expect(response.status).toBe(404);
     expect(mocks.tx.alert.update).not.toHaveBeenCalled();
+  });
+
+  it("reopens an acknowledged alert and records the reversal", async () => {
+    const operator = actor(Role.MACHINE_OPERATOR, operatorId);
+    mocks.prisma.user.findUnique.mockResolvedValue(operator);
+    mocks.tx.alert.findFirst.mockResolvedValue({ ...alert, status: AlertStatus.ACKNOWLEDGED });
+    mocks.tx.alert.update.mockResolvedValue({ ...alert, status: AlertStatus.OPEN, acknowledgedAt: null });
+
+    const response = await request(app)
+      .patch(`/api/alerts/${alertId}/reopen`)
+      .set("Authorization", bearer(operator));
+
+    expect(response.status).toBe(200);
+    expect(mocks.tx.alert.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: alertId },
+      data: { status: AlertStatus.OPEN, acknowledgedAt: null }
+    }));
+    expect(mocks.tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ action: "ALERT_REOPENED", actorId: operatorId })
+    }));
   });
 
   it("keeps acknowledgement idempotent and rejects resolved alerts", async () => {

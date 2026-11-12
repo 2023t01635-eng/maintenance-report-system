@@ -1,4 +1,4 @@
-import { EvidenceType } from "@prisma/client";
+import { EvidenceType, WorkOrderCategory, WorkOrderPriority } from "@prisma/client";
 import { z } from "zod";
 
 const requiredText = (max: number) => z.string().trim().min(1).max(max);
@@ -45,10 +45,12 @@ const optionalFileUrl = z
 const draftFields = {
   machineId: z.string().uuid(),
   providerId: nullableUuid,
+  sourceAlertId: nullableUuid,
   title: requiredText(150),
   description: optionalText(5_000),
+  category: z.nativeEnum(WorkOrderCategory).optional(),
+  priority: z.nativeEnum(WorkOrderPriority).optional(),
   scheduledDate: nullableDate,
-  cost: nullableCost,
   replacedParts: optionalText(5_000),
   notes: optionalText(5_000)
 };
@@ -59,10 +61,12 @@ export const updateWorkOrderSchema = z
   .object({
     machineId: draftFields.machineId.optional(),
     providerId: draftFields.providerId,
+    sourceAlertId: draftFields.sourceAlertId,
     title: draftFields.title.optional(),
     description: draftFields.description,
+    category: draftFields.category,
+    priority: draftFields.priority,
     scheduledDate: draftFields.scheduledDate,
-    cost: draftFields.cost,
     replacedParts: draftFields.replacedParts,
     notes: draftFields.notes
   })
@@ -79,19 +83,64 @@ export const createEvidenceSchema = z
   .strict();
 
 export const sendToProviderSchema = z.object({ providerId: z.string().uuid() }).strict();
+export const approveAndDispatchSchema = z
+  .object({
+    providerId: z.string().uuid(),
+    proposedBudget: z.coerce.number().finite().min(0).max(9_999_999_999.99)
+  })
+  .strict();
+export const rejectWorkOrderSchema = z.object({ reason: optionalText(2_000) }).strict();
+export const approvePaymentSchema = z.object({ paymentReference: optionalText(150) }).strict();
+export const counterPaymentSchema = z
+  .object({
+    counterBudget: z.coerce.number().finite().min(0).max(9_999_999_999.99),
+    reason: requiredText(2_000)
+  })
+  .strict();
 
 export const updateServiceDetailsSchema = z
   .object({
     completedDate: nullableDate,
-    cost: nullableCost,
+    serviceCost: nullableCost,
     replacedParts: optionalText(5_000),
-    notes: optionalText(5_000)
+    notes: optionalText(5_000),
+    providerBusinessName: optionalText(180),
+    providerAddress: optionalText(500),
+    providerRegistrationNumber: optionalText(120),
+    providerContact: optionalText(180),
+    invoiceNumber: optionalText(120)
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0, "At least one field is required");
+
+export const createReplacementSchema = z
+  .object({
+    machinePartId: nullableUuid,
+    partName: requiredText(120),
+    partNumber: optionalText(100),
+    quantity: z.coerce.number().int().min(1).max(100_000),
+    unitCost: nullableCost,
+    warrantyStart: nullableDate,
+    warrantyEnd: nullableDate,
+    nextReplacementDate: nullableDate,
+    notes: optionalText(2_000)
+  })
+  .strict()
+  .refine(
+    (value) => !value.warrantyStart || !value.warrantyEnd || value.warrantyEnd >= value.warrantyStart,
+    { message: "Warranty end date must be on or after the start date", path: ["warrantyEnd"] }
+  );
+
+export const updateReplacementSchema = createReplacementSchema;
 
 export type CreateWorkOrderInput = z.infer<typeof createWorkOrderSchema>;
 export type UpdateWorkOrderInput = z.infer<typeof updateWorkOrderSchema>;
 export type CreateEvidenceInput = z.infer<typeof createEvidenceSchema>;
 export type SendToProviderInput = z.infer<typeof sendToProviderSchema>;
+export type ApproveAndDispatchInput = z.infer<typeof approveAndDispatchSchema>;
 export type UpdateServiceDetailsInput = z.infer<typeof updateServiceDetailsSchema>;
+export type RejectWorkOrderInput = z.infer<typeof rejectWorkOrderSchema>;
+export type ApprovePaymentInput = z.infer<typeof approvePaymentSchema>;
+export type CounterPaymentInput = z.infer<typeof counterPaymentSchema>;
+export type CreateReplacementInput = z.infer<typeof createReplacementSchema>;
+export type UpdateReplacementInput = z.infer<typeof updateReplacementSchema>;

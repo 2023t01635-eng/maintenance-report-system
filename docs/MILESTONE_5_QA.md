@@ -1,5 +1,7 @@
 # Milestone 5 QA and Demo Record
 
+> Historical Milestone 5 record. Milestone 5.5 replaces its operator-approval workflow; use `MILESTONE_5_5_QA.md` for current acceptance.
+
 ## Status
 
 - Implementation: complete

@@ -2,60 +2,102 @@
 
 PostgreSQL provides relational storage and Prisma provides typed access and migration history.
 
-## Main Tables
+## Main tables
 
 | Table | Purpose |
 |---|---|
-| `User` | Accounts, roles, providers, and machine operators |
+| `User` | Accounts and role identities |
 | `Machine` | Asset identity, status, warranty, and assigned operator |
-| `MachinePart` | Parts, quantity, warranty, and replacement date |
+| `MachinePart` | Installed parts, quantity, warranty, and replacement due date |
 | `MaintenancePlan` | Frequency, next due date, threshold, and active state |
-| `Alert` | Warranty, replacement, and maintenance alerts |
-| `WorkOrder` | Approval, provider assignment, service state, cost, dates, parts, and notes |
-| `ServiceEvidence` | Report, invoice, payment-slip, photo, and other file metadata |
-| `AuditLog` | Important business and security actions |
+| `Alert` | Asset due alerts plus management payment alerts |
+| `WorkOrder` | Service request state, category, priority, actors, dates, proposed budget, service cost, and approval data |
+| `WorkOrderReplacement` | Structured replaced-part line, cost, warranty, and next replacement date |
+| `WorkOrderPriceCounter` | Immutable owner/manager counter budget, message, reviewed total, and provider response time |
+| `ServiceEvidence` | Report, invoice, payment-slip, photo, and other metadata |
+| `AuditLog` | Security and business mutation history |
+| `OrganizationProfile` | Administrator-managed organization heading, address, registration, and contact details for reports |
 
-## Work Order Relationships
+## Work-order relationships
 
-- A machine can have many work orders.
-- A work order belongs to one machine and can have one assigned Service Provider.
-- A work order can have many evidence rows.
-- Each evidence row records the uploading user.
-- Operator authority is derived from `WorkOrder.machine.assignedOperatorId`; it is not duplicated on the work order.
-- Provider visibility is derived from `WorkOrder.providerId` and the work-order status.
+- A machine has many work orders.
+- A work order can reference the alert that initiated it.
+- A work order has optional creator, provider, management approver, and payment approver users.
+- A work order has many replacement lines and evidence rows.
+- A work order has an ordered history of price counteroffers.
+- A replacement can reference an existing machine part or create a new part at payment approval.
+- A payment approval alert has a unique work-order relationship.
+- Provider visibility derives from `providerId` and status; operator scope derives from machine assignment or request creator.
+- Payment analytics derive from approved `CLOSED` work orders; provider inflow is additionally scoped by `providerId`.
 
-## Work Order Fields
+## Important fields
 
 | Field | Purpose |
 |---|---|
-| `status` | Current workflow state |
-| `scheduledDate` | Planned service date |
-| `completedDate` | Actual completion date supplied by the provider |
-| `cost` | Optional nonnegative service cost |
-| `replacedParts` | Provider-entered replaced-parts summary |
-| `notes` | General service notes |
-| `providerId` | Selected active Service Provider |
-| `approvedById` / `approvedAt` | Operator approval evidence |
+| `WorkOrder.category` | Breakdown, preventive, warranty, replacement, inspection, or other |
+| `WorkOrder.priority` | Low, normal, high, or urgent |
+| `createdById` | User who raised the request |
+| `sourceAlertId` | Due alert that initiated the request |
+| `managementApprovedById` / `managementApprovedAt` | Dispatch authorization |
+| `providerAcceptedAt` | Provider acknowledgement timestamp |
+| `completionSubmittedAt` | Provider handoff to payment review |
+| `paymentApprovedById` / `paymentApprovedAt` | Final management approval |
+| `paymentReference` | Invoice or transaction reference |
+| `providerBusinessName` / `providerAddress` | Provider identity captured for the completed service receipt |
+| `providerRegistrationNumber` / `providerContact` | Provider registration and contact shown on the receipt |
+| `invoiceNumber` | Provider invoice or receipt number |
+| `proposedBudget` | Organization amount proposed during management dispatch; mapped to the existing `cost` database column |
+| `serviceCost` | Provider-entered service or labour charge, excluding replacement parts |
+| `WorkOrderReplacement.quantity * unitCost` | Calculated line total used in the parts total |
+| `WorkOrderReplacement.warrantyEnd` | New part warranty end |
+| `WorkOrderReplacement.nextReplacementDate` | Date copied to `MachinePart.replacementDue` at closure |
+| `WorkOrderPriceCounter.counterBudget` | Revised management negotiation target |
+| `WorkOrderPriceCounter.reviewedTotal` | Provider final total management reviewed before countering |
+| `WorkOrderPriceCounter.reason` / `respondedAt` | Management message and provider resubmission time |
 
-`ServiceEvidence` stores `type`, `fileName`, optional `fileUrl`, optional `notes`, `uploadedById`, and `createdAt`. URLs are validated as HTTP, HTTPS, or root-relative paths before persistence.
+## Migrations
 
-## Migration
-
-Milestone 5 adds:
+Milestone 5 base field:
 
 ```text
 apps/api/prisma/migrations/20261110004315_add_work_order_replaced_parts/migration.sql
 ```
 
-The migration adds nullable `WorkOrder.replacedParts`. Apply it after extracting the package over a Milestone 4 installation:
+Milestone 5.5 workflow:
+
+```text
+apps/api/prisma/migrations/20261110023000_milestone_5_5_workflow/migration.sql
+```
+
+Milestone 5.5 activity and receipt identity:
+
+```text
+apps/api/prisma/migrations/20261111190000_activity_and_receipt_identity/migration.sql
+```
+
+Milestone 5.5 proposed budget and actual total:
+
+```text
+apps/api/prisma/migrations/20261112001500_proposed_budget_and_actual_total/migration.sql
+```
+
+Milestone 5.5 payment counter negotiation:
+
+```text
+apps/api/prisma/migrations/20261112013000_payment_counter_negotiation/migration.sql
+```
+
+Apply both pending migrations to the existing local database:
 
 ```powershell
 npm run prisma:generate
 npm run prisma:migrate
 ```
 
-The existing initial migration remains in the user's local repository. The Milestone 5 archive adds this migration beside that history.
+The migrations preserve legacy enum values and add the corrected statuses, alert type, category/priority enums, approver fields, uploader field, payment relationship, replacement and price-counter tables, receipt identity fields, organization profile, service-cost field, indexes, and foreign keys. Parts total, final total, and budget variance are derived from persisted values rather than duplicated database columns.
 
-## Audit Records
+The Payments tab adds no reporting table or migration. Its cash-flow totals and monthly groups are read models calculated from `WorkOrder`, `WorkOrderReplacement`, machine, provider, and payment-approver relationships.
 
-Work-order state changes, service detail updates, and evidence additions use the existing string-based `AuditLog.action` field. Every successful action records the authenticated actor and request context through the shared audit service.
+## Transaction rule
+
+Workflow mutations use serializable Prisma transactions. Payment approval updates or creates machine parts, resolves the payment alert, closes the request, and writes one audit event atomically. A failure rolls back the whole operation.

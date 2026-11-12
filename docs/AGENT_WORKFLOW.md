@@ -2,32 +2,27 @@
 
 Use this workflow when asking Codex to continue the Maintenance Report System.
 
-## Milestone Flow
+## Team flow
 
-1. Project Lead reads the source handoff, confirms scope, and assigns non-overlapping file areas.
-2. Database/API Agent implements validation, service rules, routes, transactions, audit events, migrations, and backend tests.
-3. Frontend Agent implements the API client, role-aware workspace, complete UI states, responsive behavior, and frontend tests.
-4. QA Agent reviews RBAC, transition validity, relationship scope, regressions, and integrated verification.
-5. Docs/Demo Agent updates `README.md` and `docs/**` using only observed results.
-6. Project Lead resolves findings, packages the source, and leaves Git unchanged unless the user requests a commit.
+1. Project Lead reads the handoff, confirms scope, and assigns non-overlapping areas.
+2. Database/API Agent implements schema, migrations, validation, authorization, transactions, audit, and API tests.
+3. Frontend Agent implements contracts, role-aware workflows, responsive states, printing, and component tests.
+4. QA Agent checks role isolation, transition validity, negative paths, migrations, and regressions.
+5. Docs/Demo Agent updates observed results, Windows steps, and the executable user scenario.
+6. Project Lead integrates, verifies, packages source, and leaves Git unchanged unless the user requests a commit.
 
-## Milestone 5 Ownership
+## Milestone 5.5 integration contract
 
-| Agent | Responsibility |
-|---|---|
-| Database/API | Work-order state machine, operator/provider scope, service details, evidence metadata, audit, migration, tests |
-| Frontend | Work-order list/detail, create/edit, approval, dispatch, provider workflow, evidence, responsive states, tests |
-| QA | Endpoint RBAC, invalid transitions, provider isolation, URL validation, M1-M4 regressions |
-| Docs/Demo | Endpoint contract, role matrix, migration, Windows demo, pending manual checks |
-| Project Lead | Integration decisions, full verification, package integrity, delivery |
+`DRAFT -> PENDING_MANAGEMENT_APPROVAL -> SENT_TO_PROVIDER -> PROVIDER_ACCEPTED -> IN_PROGRESS -> AWAITING_PAYMENT_APPROVAL -> CLOSED`
 
-## Integration Contract
+- The operator creates and submits a request for their own machine; no duplicate operator approval is required.
+- Admin, Owner, or Manager selects an active provider and dispatches.
+- Only the selected provider can accept, start, edit service data, add replacements/evidence, and submit completion.
+- Completion creates a payment alert for management.
+- Admin, Owner, or Manager approves payment; part dates are then applied and the request closes.
+- `REJECTED`, `CANCELLED`, and `CLOSED` do not move backward.
 
-The status path is `DRAFT -> PENDING_OPERATOR_APPROVAL -> APPROVED -> SENT_TO_PROVIDER -> IN_PROGRESS -> COMPLETED`. Management can cancel a nonterminal order.
-
-The assigned operator is the only user who can approve a pending order. Management sends an approved order with `{ providerId }`. Only that provider can start, update service details, add evidence, and complete it. Providers never receive draft or pending records.
-
-## Verification Handoff
+## Verification handoff
 
 ```powershell
 npm run prisma:generate
@@ -36,19 +31,25 @@ npm test
 npm run build
 ```
 
-The Project Lead records actual counts and completes `docs/MILESTONE_5_QA.md`. Milestone 5 includes a real Prisma migration and local Windows installation must run `npm run prisma:migrate`.
+Then run the database-backed scenario while API and PostgreSQL are active:
 
-## Review Gates
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\milestone-5-5-live-scenario.ps1
+```
 
-- State transitions enforce both current status and authenticated relationship.
-- Provider assignment is selected only after operator approval.
-- Provider list queries cannot reveal unassigned work.
-- Operators cannot approve work for another operator's machine.
-- Service details and evidence are provider-only and linked to the assigned order.
-- Evidence URL validation rejects unsafe schemes.
-- Successful mutations create the expected audit action.
-- Milestones 1 through 4 remain green.
+Record only observed results in `docs/MILESTONE_5_5_QA.md`.
 
-## Local Desktop Remote
+## Review gates
 
-The project uses a local bare Git repository instead of a hosted remote. The Project Lead inspects the diff and verification results before any requested commit. Use the real current time; never backdate or fabricate Git history.
+- Operators can mutate only their assigned machines, parts, plans, alerts, and requests.
+- Provider assignment accepts only an active Service Provider.
+- Providers cannot list or mutate unassigned work.
+- Provider acceptance is required before service starts.
+- Replacement warranty ranges are valid and immutable after completion submission.
+- Payment approval is management-only and atomically updates parts, resolves the alert, and closes the order.
+- Every successful mutation creates the expected audit action.
+- Authentication, users, assets, alerts, scheduler, and legacy rows remain compatible.
+
+## Git policy
+
+Inspect the diff and verification results before any requested commit. Use the real current time; never backdate or fabricate Git history.

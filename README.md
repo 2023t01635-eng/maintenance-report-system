@@ -1,10 +1,14 @@
 # Maintenance Request Reporting System
 
-Role-based maintenance management prototype for the Department of Instrumentation and Automation Technology, Faculty of Technology, University of Colombo.
+Role-based maintenance management for the Department of Instrumentation and Automation Technology, Faculty of Technology, University of Colombo.
 
-Milestone 5 adds an approval-controlled work-order workflow on top of the asset register and deadline alerts delivered in Milestones 3 and 4. Management creates and submits a request, the assigned Machine Operator approves external sharing, management selects a Service Provider, and that provider records progress, service details, and evidence metadata.
+Milestone 5.5 corrects the complete service path: an operator registers a machine and its due dates, responds to an alert, raises a categorized request, management assigns a provider, the provider records service and replacement warranty data, and management approves payment before the request closes and asset dates change.
 
-## Technology Stack
+The corrective update also fixes assigned-provider request access, adds hierarchical role-scoped recent activity, prevents alert action overlap, adds administrator/provider identity fields to the printable service receipt, and provides finalized payment analytics for management and service providers.
+
+Budgeting is separated from actual service billing: management sets the proposed budget when dispatching, the provider enters the service/labour charge and priced replacement lines, and the system calculates the parts total, final total, and budget variance automatically for payment review.
+
+## Technology
 
 | Layer | Technology |
 |---|---|
@@ -12,75 +16,61 @@ Milestone 5 adds an approval-controlled work-order workflow on top of the asset 
 | Backend | Node.js, Express, TypeScript |
 | Database | PostgreSQL |
 | ORM | Prisma |
-| Logging | Pino and database audit records |
 | Testing | Vitest, Supertest, React Testing Library |
-| Local Run | Docker Compose |
+| Local environment | Docker Compose and Windows PowerShell |
 
-## Project Structure
-
-```text
-maintenance-report-system/
-  apps/
-    api/
-      prisma/
-      src/
-    web/
-      src/
-  docs/
-  docker-compose.yml
-  AGENTS.md
-  README.md
-```
-
-## Milestone 5 Scope
-
-1. Admin, Owner, and Manager create, edit, submit, dispatch, and cancel work orders.
-2. A work order must be approved by the Machine Operator assigned to its machine before it can be shared externally.
-3. Management selects an active Service Provider when dispatching an approved work order.
-4. A Service Provider sees only work orders assigned to that account and only after approval.
-5. The assigned provider starts and completes work and records completion date, cost, replaced parts, and notes.
-6. The assigned provider records immutable evidence metadata for service reports, invoices, payment slips, photos, or other files.
-7. Admin, Owner, and Manager can review completed service details and evidence.
-8. Every successful workflow transition and service-data mutation writes an audit action.
-
-Milestone 5 stores file metadata and an optional safe HTTP, HTTPS, or root-relative URL. Binary file storage and report generation remain outside this milestone.
-
-## Work Order Lifecycle
+## Milestone 5.5 workflow
 
 ```mermaid
 flowchart TD
-  Draft[DRAFT] -->|Management submits| Pending[PENDING_OPERATOR_APPROVAL]
-  Pending -->|Assigned operator approves| Approved[APPROVED]
-  Approved -->|Management selects provider| Sent[SENT_TO_PROVIDER]
-  Sent -->|Assigned provider starts| Progress[IN_PROGRESS]
-  Progress -->|Assigned provider completes| Complete[COMPLETED]
+  Draft[DRAFT] --> Review[PENDING_MANAGEMENT_APPROVAL]
+  Review --> Sent[SENT_TO_PROVIDER]
+  Sent --> Accepted[PROVIDER_ACCEPTED]
+  Accepted --> Progress[IN_PROGRESS]
+  Progress --> Payment[AWAITING_PAYMENT_APPROVAL]
+  Payment --> Closed[CLOSED]
 ```
 
-Admin, Owner, or Manager can change any nonterminal order to `CANCELLED`.
+`REJECTED` and `CANCELLED` are terminal alternatives. Legacy Milestone 5 statuses remain in the enum so existing records are readable.
 
-## Work Order API Contract
+## Roles
 
-| Method | Endpoint | Purpose | Access |
-|---|---|---|---|
-| `GET` | `/api/work-orders` | List role-scoped work orders | All authenticated roles |
-| `GET` | `/api/work-orders/:id` | Read one visible work order | All authenticated roles |
-| `GET` | `/api/work-orders/providers` | List active providers for dispatch | Admin, Owner, Manager |
-| `POST` | `/api/work-orders` | Create a draft | Admin, Owner, Manager |
-| `PATCH` | `/api/work-orders/:id` | Edit a draft | Admin, Owner, Manager |
-| `POST` | `/api/work-orders/:id/submit` | Request operator approval | Admin, Owner, Manager |
-| `POST` | `/api/work-orders/:id/approve` | Approve external sharing | Assigned Machine Operator |
-| `POST` | `/api/work-orders/:id/send-to-provider` | Select provider and dispatch | Admin, Owner, Manager |
-| `POST` | `/api/work-orders/:id/start` | Start assigned work | Assigned Service Provider |
-| `PATCH` | `/api/work-orders/:id/service-details` | Save service date, cost, parts, notes | Assigned Service Provider |
-| `POST` | `/api/work-orders/:id/evidence` | Add evidence metadata | Assigned Service Provider |
-| `POST` | `/api/work-orders/:id/complete` | Complete assigned work | Assigned Service Provider |
-| `POST` | `/api/work-orders/:id/cancel` | Cancel a nonterminal order | Admin, Owner, Manager |
+| Role | Capabilities |
+|---|---|
+| Admin | User administration plus all management review, dispatch, cancellation, and payment actions |
+| Owner | Business review, dispatch, rejection, cancellation, and payment approval |
+| Manager | Daily operational review, dispatch, rejection, cancellation, scheduler runs, and payment approval |
+| Machine Operator | Create and maintain owned machines, parts, plans, dates, alerts, and service requests |
+| Service Provider | View assigned dispatched work, accept, start, record service/replacements/evidence, and submit completion |
 
-Backend authorization is the security boundary. Frontend control visibility does not replace API permission checks.
+Owner and Manager overlap on service approvals so operations do not depend on one account. Admin remains the only user-administration role.
 
-## Windows PowerShell Setup
+## Important API actions
 
-Docker Desktop must be open and its Linux container engine must be running. Stop running Node processes before Prisma generation on Windows so its query-engine DLL is not locked.
+| Method | Endpoint | Access |
+|---|---|---|
+| `POST` | `/api/work-orders` | Admin, Owner, Manager, Machine Operator |
+| `POST` | `/api/work-orders/:id/submit` | Draft creator or authorized management |
+| `POST` | `/api/work-orders/:id/approve-and-dispatch` | Admin, Owner, Manager |
+| `POST` | `/api/work-orders/:id/reject` | Admin, Owner, Manager |
+| `POST` | `/api/work-orders/:id/accept` | Assigned Service Provider |
+| `POST` | `/api/work-orders/:id/start` | Assigned Service Provider |
+| `PATCH` | `/api/work-orders/:id/service-details` | Assigned Service Provider |
+| `POST` | `/api/work-orders/:id/replacements` | Assigned Service Provider |
+| `POST` | `/api/work-orders/:id/evidence` | Assigned Service Provider |
+| `POST` | `/api/work-orders/:id/submit-completion` | Assigned Service Provider |
+| `POST` | `/api/work-orders/:id/approve-payment` | Admin, Owner, Manager |
+| `PATCH` | `/api/alerts/:id/reopen` | Alert reader in scope |
+| `GET` | `/api/dashboard/activity` | Authenticated; audit events are scoped to the role's records |
+| `GET` | `/api/dashboard/payments` | Admin, Owner, Manager, Service Provider; provider results are assigned-only |
+| `GET` | `/api/organization-profile` | Authenticated |
+| `PATCH` | `/api/organization-profile` | Admin |
+
+Backend authorization is the security boundary. Hidden frontend controls do not replace API permission checks.
+
+## Windows installation
+
+Open Docker Desktop first. Then run from PowerShell:
 
 ```powershell
 Set-Location "C:\Users\Malith pamuditha\Desktop\maintenance-report-system"
@@ -94,11 +84,14 @@ Copy-Item .env apps/api/.env -Force
 npm install
 npm run prisma:generate
 npm run prisma:migrate
+npm run typecheck
+npm test
+npm run build
 ```
 
-Milestone 5 adds the migration `20261110004315_add_work_order_replaced_parts`. It adds `WorkOrder.replacedParts` and must be applied to an existing Milestone 4 database.
+Milestone 5.5 adds migration `20261110023000_milestone_5_5_workflow`. The corrective updates add `20261111190000_activity_and_receipt_identity`, `20261112001500_proposed_budget_and_actual_total`, and `20261112013000_payment_counter_negotiation`. They preserve existing records while adding receipt identity, separate service-cost storage, and repeatable owner/manager price counteroffers; the existing `cost` database column is retained as the current management-proposed budget.
 
-Optional demonstration administrator seed:
+Optional local administrator seed:
 
 ```powershell
 npm run seed --workspace apps/api
@@ -109,39 +102,37 @@ Email: admin@example.com
 Password: Admin@12345
 ```
 
-The seed is for local demonstration only.
+## Run locally
 
-## Run Locally
-
-Start the API and leave the PowerShell window open:
+Keep this first PowerShell window open:
 
 ```powershell
 npm run dev:api
 ```
 
-In a second PowerShell window:
+Open a second PowerShell window:
 
 ```powershell
 Set-Location "C:\Users\Malith pamuditha\Desktop\maintenance-report-system"
 npm run dev:web
 ```
 
-Open the frontend at <http://localhost:5173> and API health at <http://localhost:4000/api/health>.
+Frontend: <http://localhost:5173>  
+API health: <http://localhost:4000/api/health>
 
-## Milestone 5 Demo Script
+## Acceptance scenario
 
-1. As Admin, create active Machine Operator and Service Provider accounts.
-2. Assign the operator to a machine in the asset workspace.
-3. Open Work Orders, create a draft for that machine, and submit it.
-4. Sign in as the assigned operator and approve the pending work order.
-5. Sign in as Admin, Owner, or Manager, select the provider, and send the order.
-6. Sign in as that provider and confirm only assigned approved work is visible.
-7. Start the work order, save service date, cost, replaced parts, and notes.
-8. Add report, invoice, or payment-slip metadata and complete the work.
-9. Sign in as management and review the completed details and evidence.
-10. Confirm another operator or provider cannot access or mutate the order.
+The complete role-by-role walkthrough is in `docs/MILESTONE_5_5_USER_SCENARIO.md`.
 
-## Verification Commands
+After the API is running, execute the live database-backed scenario:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\milestone-5-5-live-scenario.ps1
+```
+
+It creates uniquely named local test users and records. It passes only after verifying the payment alert, closed request, replacement warranty dates, role-private activity feeds, management outflow, and provider inflow.
+
+## Verification
 
 ```powershell
 npm run prisma:generate
@@ -150,21 +141,13 @@ npm test
 npm run build
 ```
 
-Milestone 5 automated integration verification passed on 2026-11-10: Prisma validation, API/web type checking, 66 API tests, 32 web tests, and both production builds completed successfully. Windows/Docker/PostgreSQL workflow and responsive browser checks remain for local sign-off in `docs/MILESTONE_5_QA.md`.
+See `docs/MILESTONE_5_5_QA.md` for the observed results and remaining Windows live sign-off.
 
-## Local Git Remote
+## Local Git policy
 
-The project can remain local by using the Desktop bare repository as `origin`. Commit only when requested and use the real current date and time; do not backdate or fabricate history.
+The project may use the local Desktop bare repository as `origin`. Do not commit unless requested. Use the real current date and time; do not backdate or fabricate history.
 
 ```powershell
 git remote set-url origin "C:\Users\Malith pamuditha\Desktop\maintenance-report-system-local-remote.git"
 git status
 ```
-
-## Milestone Status
-
-- Milestone 1: monorepo, API/web foundations, Prisma schema, and Docker configuration.
-- Milestone 2: authentication, first-admin setup, user administration, sessions, RBAC, and audit foundations.
-- Milestone 3: machine, part, maintenance-plan, assignment, asset RBAC, audit, tests, and demo documentation.
-- Milestone 4: alert scheduler, deduplication, reconciliation, role-scoped alerts, acknowledgement, and responsive alert UI.
-- Milestone 5: operator-approved work orders, provider dispatch and visibility, progress updates, service details, evidence metadata, audit coverage, and responsive work-order UI complete; local Windows sign-off pending.

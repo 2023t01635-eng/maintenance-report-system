@@ -157,15 +157,17 @@ describe("AssetWorkspace", () => {
     expect(screen.getByRole("button", { name: "Delete plan Monthly lubrication" })).toBeInTheDocument();
   });
 
-  it("keeps operator asset records read-only while allowing assigned maintenance plans", async () => {
+  it("lets operators maintain their assigned machines, parts, and plans without destructive controls", async () => {
     const fetchMock = await renderFor("MACHINE_OPERATOR");
 
-    expect(screen.getByText(/Manage maintenance plans for assigned machines/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add machine" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Edit machine" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add part" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Register and maintain your assigned machines/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add machine" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit machine" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add part" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit part Drive belt" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add plan" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit plan Monthly lubrication" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/operators"))).toBe(false);
   });
 

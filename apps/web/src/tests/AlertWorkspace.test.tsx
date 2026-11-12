@@ -11,6 +11,7 @@ const openAlert: MaintenanceAlert = {
   message: "Monthly lubrication is due",
   acknowledgedAt: null,
   createdAt: "2026-11-01T00:00:00.000Z",
+  paymentWorkOrderId: null,
   machine: {
     id: "machine-1",
     assetCode: "M-001",
@@ -81,6 +82,49 @@ describe("AlertWorkspace", () => {
     })).toBe(true));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Acknowledge" })).not.toBeInTheDocument());
     expect(screen.getAllByText("Acknowledged").length).toBeGreaterThan(1);
+  });
+
+  it("reopens an acknowledged alert", async () => {
+    let reopened = false;
+    const acknowledgedAlert = { ...openAlert, status: "ACKNOWLEDGED" as const, acknowledgedAt: "2026-11-09T12:00:00.000Z" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      if (path === "/api/alerts/alert-1/reopen" && method === "PATCH") {
+        reopened = true;
+        return response({ alert: openAlert });
+      }
+      if (path === "/api/alerts" && method === "GET") {
+        return response({
+          alerts: [reopened ? openAlert : acknowledgedAlert],
+          summary: reopened ? summary : { ...summary, open: 0, acknowledged: 1 }
+        });
+      }
+      return response({ message: "Not found" }, 404);
+    });
+
+    render(<AlertWorkspace user={currentUser("MACHINE_OPERATOR")} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) => {
+      return new URL(String(input)).pathname === "/api/alerts/alert-1/reopen" && init?.method === "PATCH";
+    })).toBe(true));
+    expect(await screen.findByRole("button", { name: "Acknowledge" })).toBeInTheDocument();
+  });
+
+  it("starts a categorized service request from an operator alert", async () => {
+    const onCreateServiceRequest = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ alerts: [openAlert], summary }));
+
+    render(<AlertWorkspace user={currentUser("MACHINE_OPERATOR")} onCreateServiceRequest={onCreateServiceRequest} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create service request" }));
+
+    expect(onCreateServiceRequest).toHaveBeenCalledWith({
+      machineId: "machine-1",
+      sourceAlertId: "alert-1",
+      title: "Monthly lubrication is due",
+      category: "PREVENTIVE_MAINTENANCE"
+    });
   });
 
   it.each(["ADMIN", "MANAGER"] as const)("shows scheduler controls to %s users", async (role) => {

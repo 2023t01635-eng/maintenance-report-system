@@ -20,6 +20,67 @@ export type DashboardSummary = {
   };
 };
 
+export type ActivityEvent = {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+  actor: Pick<User, "id" | "name" | "role"> | null;
+};
+
+export type PaymentRecord = {
+  id: string;
+  title: string;
+  direction: "INFLOW" | "OUTFLOW";
+  machine: { id: string; assetCode: string; name: string };
+  provider: Pick<User, "id" | "name" | "email"> | null;
+  approvedBy: Pick<User, "id" | "name" | "role"> | null;
+  paymentApprovedAt: string | null;
+  completedDate: string | null;
+  paymentReference: string | null;
+  proposedBudget: number;
+  serviceCost: number;
+  partsTotal: number;
+  paymentValue: number;
+  variance: number;
+  parts: Array<{
+    id: string;
+    partName: string;
+    partNumber: string | null;
+    quantity: number;
+    unitCost: number;
+    lineTotal: number;
+  }>;
+};
+
+export type PaymentDashboard = {
+  role: Role;
+  direction: "INFLOW" | "OUTFLOW";
+  summary: {
+    paymentTotal: number;
+    budgetTotal: number;
+    overBudgetAmount: number;
+    underBudgetAmount: number;
+    netVariance: number;
+    paymentCount: number;
+  };
+  monthly: Array<{ month: string; paymentTotal: number; budgetTotal: number; count: number }>;
+  payments: PaymentRecord[];
+};
+
+export type OrganizationProfile = {
+  id: string;
+  companyName: string;
+  address: string | null;
+  registrationNumber: string | null;
+  phone: string | null;
+  email: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type MachineStatus = "ACTIVE" | "INACTIVE" | "UNDER_MAINTENANCE" | "RETIRED";
 export type MaintenanceFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY" | "CUSTOM";
 
@@ -104,7 +165,7 @@ export type MaintenancePlanInput = {
   isActive: boolean;
 };
 
-export type AlertType = "MACHINE_WARRANTY" | "PART_WARRANTY" | "PART_REPLACEMENT" | "MAINTENANCE_DUE";
+export type AlertType = "MACHINE_WARRANTY" | "PART_WARRANTY" | "PART_REPLACEMENT" | "MAINTENANCE_DUE" | "PAYMENT_APPROVAL";
 export type AlertStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
 
 export type MaintenanceAlert = {
@@ -115,6 +176,7 @@ export type MaintenanceAlert = {
   message: string;
   acknowledgedAt: string | null;
   createdAt: string;
+  paymentWorkOrderId: string | null;
   machine: Pick<Machine, "id" | "assetCode" | "name" | "location" | "operatorId">;
   part: Pick<MachinePart, "id" | "name" | "partNumber"> | null;
   plan: Pick<MaintenancePlan, "id" | "title"> | null;
@@ -138,10 +200,26 @@ export type WorkOrderStatus =
   | "DRAFT"
   | "PENDING_OPERATOR_APPROVAL"
   | "APPROVED"
+  | "PENDING_MANAGEMENT_APPROVAL"
   | "SENT_TO_PROVIDER"
+  | "PROVIDER_ACCEPTED"
   | "IN_PROGRESS"
+  | "PRICE_REVISION_REQUESTED"
   | "COMPLETED"
+  | "AWAITING_PAYMENT_APPROVAL"
+  | "CLOSED"
+  | "REJECTED"
   | "CANCELLED";
+
+export type WorkOrderCategory =
+  | "BREAKDOWN_REPAIR"
+  | "PREVENTIVE_MAINTENANCE"
+  | "WARRANTY_SERVICE"
+  | "PART_REPLACEMENT"
+  | "INSPECTION"
+  | "OTHER";
+
+export type WorkOrderPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 
 export type EvidenceType = "SERVICE_REPORT" | "INVOICE" | "PAYMENT_SLIP" | "PHOTO" | "OTHER";
 
@@ -154,25 +232,81 @@ export type ServiceEvidence = {
   fileName: string;
   fileUrl: string | null;
   notes: string | null;
+  uploadedById?: string | null;
+  uploadedBy?: WorkOrderProvider | null;
+  createdAt: string;
+};
+
+export type WorkOrderReplacement = {
+  id: string;
+  workOrderId: string;
+  machinePartId: string | null;
+  partName: string;
+  partNumber: string | null;
+  quantity: number;
+  unitCost: number | string | null;
+  warrantyStart: string | null;
+  warrantyEnd: string | null;
+  nextReplacementDate: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkOrderPriceCounter = {
+  id: string;
+  workOrderId: string;
+  createdById: string;
+  createdBy: WorkOrderProvider;
+  counterBudget: number | string;
+  reviewedTotal: number | string;
+  reason: string;
+  respondedAt: string | null;
   createdAt: string;
 };
 
 export type WorkOrder = {
   id: string;
   machineId: string;
-  machine: Pick<Machine, "id" | "assetCode" | "name" | "location" | "operatorId">;
+  machine: Pick<Machine, "id" | "assetCode" | "name" | "category" | "location" | "status" | "operatorId" | "operator"> & {
+    parts?: MachinePart[];
+  };
   providerId: string | null;
   provider: WorkOrderProvider | null;
   approvedByOperatorId: string | null;
   approvedByOperator: Pick<User, "id" | "name" | "email"> | null;
+  createdById?: string | null;
+  createdBy?: WorkOrderProvider | null;
+  sourceAlertId?: string | null;
+  sourceAlert?: Pick<MaintenanceAlert, "id" | "type" | "status" | "dueDate" | "message"> | null;
+  managementApprovedById?: string | null;
+  managementApprovedBy?: WorkOrderProvider | null;
+  managementApprovedAt?: string | null;
+  paymentApprovedById?: string | null;
+  paymentApprovedBy?: WorkOrderProvider | null;
+  paymentApprovedAt?: string | null;
+  paymentReference?: string | null;
   title: string;
   description: string | null;
+  category: WorkOrderCategory;
+  priority: WorkOrderPriority;
   status: WorkOrderStatus;
   scheduledDate: string | null;
+  providerAcceptedAt?: string | null;
+  completionSubmittedAt?: string | null;
   completedDate: string | null;
-  cost: number | string | null;
+  proposedBudget: number | string | null;
+  serviceCost: number | string | null;
   notes: string | null;
   replacedParts: string | null;
+  providerBusinessName?: string | null;
+  providerAddress?: string | null;
+  providerRegistrationNumber?: string | null;
+  providerContact?: string | null;
+  invoiceNumber?: string | null;
+  rejectionReason?: string | null;
+  replacements?: WorkOrderReplacement[];
+  priceCounterOffers?: WorkOrderPriceCounter[];
   evidence: ServiceEvidence[];
   createdAt: string;
   updatedAt: string;
@@ -181,11 +315,25 @@ export type WorkOrder = {
 export type WorkOrderInput = {
   machineId: string;
   title: string;
+  category?: WorkOrderCategory;
+  priority?: WorkOrderPriority;
+  sourceAlertId?: string | null;
   description?: string | null;
   scheduledDate?: string | null;
-  cost?: number | null;
   notes?: string | null;
   replacedParts?: string | null;
+};
+
+export type WorkOrderReplacementInput = {
+  machinePartId?: string | null;
+  partName: string;
+  partNumber?: string | null;
+  quantity: number;
+  unitCost?: number | null;
+  warrantyStart?: string | null;
+  warrantyEnd?: string | null;
+  nextReplacementDate?: string | null;
+  notes?: string | null;
 };
 
 export type ServiceEvidenceInput = {
@@ -197,9 +345,14 @@ export type ServiceEvidenceInput = {
 
 export type WorkOrderServiceDetailsInput = {
   completedDate?: string | null;
-  cost?: number | null;
+  serviceCost?: number | null;
   replacedParts?: string | null;
   notes?: string | null;
+  providerBusinessName?: string | null;
+  providerAddress?: string | null;
+  providerRegistrationNumber?: string | null;
+  providerContact?: string | null;
+  invoiceNumber?: string | null;
 };
 
 export type UserInput = {
@@ -261,6 +414,25 @@ export function logout() {
 
 export function getDashboardSummary() {
   return apiRequest<DashboardSummary>("/dashboard/summary");
+}
+
+export function getDashboardActivity() {
+  return apiRequest<{ events: ActivityEvent[] }>("/dashboard/activity");
+}
+
+export function getDashboardPayments() {
+  return apiRequest<PaymentDashboard>("/dashboard/payments");
+}
+
+export function getOrganizationProfile() {
+  return apiRequest<{ profile: OrganizationProfile }>("/organization-profile");
+}
+
+export function updateOrganizationProfile(input: Omit<OrganizationProfile, "id" | "createdAt" | "updatedAt">) {
+  return apiRequest<{ profile: OrganizationProfile }>("/organization-profile", {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
 }
 
 export function getUsers() {
@@ -363,6 +535,10 @@ export function acknowledgeAlert(id: string) {
   return apiRequest<{ alert: MaintenanceAlert }>(`/alerts/${id}/acknowledge`, { method: "PATCH" });
 }
 
+export function reopenAlert(id: string) {
+  return apiRequest<{ alert: MaintenanceAlert }>(`/alerts/${id}/reopen`, { method: "PATCH" });
+}
+
 export function runAlertScheduler() {
   return apiRequest<{ result: AlertSchedulerResult }>("/alerts/run-scheduler", { method: "POST" });
 }
@@ -419,12 +595,36 @@ export function sendWorkOrderToProvider(id: string, providerId: string) {
   return runWorkOrderAction(id, "send-to-provider", { providerId });
 }
 
+export function approveAndDispatchWorkOrder(id: string, providerId: string, proposedBudget: number) {
+  return runWorkOrderAction(id, "approve-and-dispatch", { providerId, proposedBudget });
+}
+
+export function rejectWorkOrder(id: string, reason?: string) {
+  return runWorkOrderAction(id, "reject", { reason: reason?.trim() || null });
+}
+
+export function acceptWorkOrder(id: string) {
+  return runWorkOrderAction(id, "accept");
+}
+
 export function startWorkOrder(id: string) {
   return runWorkOrderAction(id, "start");
 }
 
 export function completeWorkOrder(id: string) {
   return runWorkOrderAction(id, "complete");
+}
+
+export function submitWorkOrderCompletion(id: string) {
+  return runWorkOrderAction(id, "submit-completion");
+}
+
+export function approveWorkOrderPayment(id: string, paymentReference?: string) {
+  return runWorkOrderAction(id, "approve-payment", paymentReference?.trim() ? { paymentReference: paymentReference.trim() } : {});
+}
+
+export function counterWorkOrderPayment(id: string, counterBudget: number, reason: string) {
+  return runWorkOrderAction(id, "counter-payment", { counterBudget, reason: reason.trim() });
 }
 
 export function cancelWorkOrder(id: string) {
@@ -436,4 +636,22 @@ export function addWorkOrderEvidence(id: string, input: ServiceEvidenceInput) {
     method: "POST",
     body: JSON.stringify(input)
   });
+}
+
+export function addWorkOrderReplacement(id: string, input: WorkOrderReplacementInput) {
+  return apiRequest<{ replacement: WorkOrderReplacement }>(`/work-orders/${id}/replacements`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateWorkOrderReplacement(id: string, replacementId: string, input: WorkOrderReplacementInput) {
+  return apiRequest<{ replacement: WorkOrderReplacement }>(`/work-orders/${id}/replacements/${replacementId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export function deleteWorkOrderReplacement(id: string, replacementId: string) {
+  return apiRequest<void>(`/work-orders/${id}/replacements/${replacementId}`, { method: "DELETE" });
 }

@@ -9,6 +9,7 @@ import {
   PackageSearch,
   Play,
   RefreshCw,
+  RotateCcw,
   ShieldAlert,
   Wrench
 } from "lucide-react";
@@ -16,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   acknowledgeAlert,
   getAlerts,
+  reopenAlert,
   runAlertScheduler,
   type AlertStatus,
   type AlertSummary,
@@ -26,13 +28,20 @@ import {
 
 type AlertWorkspaceProps = {
   user: User;
+  onCreateServiceRequest?: (request: {
+    machineId: string;
+    sourceAlertId: string;
+    title: string;
+    category: "PREVENTIVE_MAINTENANCE" | "WARRANTY_SERVICE" | "PART_REPLACEMENT" | "OTHER";
+  }) => void;
 };
 
 const typeLabels: Record<AlertType, string> = {
   MACHINE_WARRANTY: "Machine warranty",
   PART_WARRANTY: "Part warranty",
   PART_REPLACEMENT: "Part replacement",
-  MAINTENANCE_DUE: "Maintenance due"
+  MAINTENANCE_DUE: "Maintenance due",
+  PAYMENT_APPROVAL: "Payment approval"
 };
 
 const statusLabels: Record<AlertStatus, string> = {
@@ -45,8 +54,16 @@ const alertIcons = {
   MACHINE_WARRANTY: ShieldAlert,
   PART_WARRANTY: PackageSearch,
   PART_REPLACEMENT: Wrench,
-  MAINTENANCE_DUE: CalendarClock
+  MAINTENANCE_DUE: CalendarClock,
+  PAYMENT_APPROVAL: CheckCheck
 } satisfies Record<AlertType, typeof AlertTriangle>;
+
+const requestCategory: Record<Exclude<AlertType, "PAYMENT_APPROVAL">, "PREVENTIVE_MAINTENANCE" | "WARRANTY_SERVICE" | "PART_REPLACEMENT"> = {
+  MACHINE_WARRANTY: "WARRANTY_SERVICE",
+  PART_WARRANTY: "WARRANTY_SERVICE",
+  PART_REPLACEMENT: "PART_REPLACEMENT",
+  MAINTENANCE_DUE: "PREVENTIVE_MAINTENANCE"
+};
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
@@ -70,7 +87,7 @@ export function AlertWorkspace(props: AlertWorkspaceProps) {
   return <AlertWorkspaceContent {...props} />;
 }
 
-function AlertWorkspaceContent({ user }: AlertWorkspaceProps) {
+function AlertWorkspaceContent({ user, onCreateServiceRequest }: AlertWorkspaceProps) {
   const [alerts, setAlerts] = useState<MaintenanceAlert[]>([]);
   const [summary, setSummary] = useState<AlertSummary>({ open: 0, acknowledged: 0, overdue: 0, dueSoon: 0 });
   const [statusFilter, setStatusFilter] = useState<AlertStatus | "ALL">("ALL");
@@ -119,6 +136,19 @@ function AlertWorkspaceContent({ user }: AlertWorkspaceProps) {
       await loadAlerts(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to acknowledge alert");
+    } finally {
+      setBusyAlertId(null);
+    }
+  }
+
+  async function handleReopen(alert: MaintenanceAlert) {
+    setBusyAlertId(alert.id);
+    setError("");
+    try {
+      await reopenAlert(alert.id);
+      await loadAlerts(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to reopen alert");
     } finally {
       setBusyAlertId(null);
     }
@@ -239,6 +269,21 @@ function AlertWorkspaceContent({ user }: AlertWorkspaceProps) {
                     {alert.status === "OPEN" && (
                       <button className="secondary-button button-with-icon" type="button" onClick={() => handleAcknowledge(alert)} disabled={busyAlertId === alert.id}>
                         <Check aria-hidden="true" /> {busyAlertId === alert.id ? "Saving..." : "Acknowledge"}
+                      </button>
+                    )}
+                    {alert.status === "ACKNOWLEDGED" && (
+                      <button className="secondary-button button-with-icon" type="button" onClick={() => handleReopen(alert)} disabled={busyAlertId === alert.id}>
+                        <RotateCcw aria-hidden="true" /> {busyAlertId === alert.id ? "Saving..." : "Reopen"}
+                      </button>
+                    )}
+                    {user.role === "MACHINE_OPERATOR" && alert.status !== "RESOLVED" && alert.type !== "PAYMENT_APPROVAL" && onCreateServiceRequest && (
+                      <button className="primary-button button-with-icon" type="button" onClick={() => onCreateServiceRequest({
+                        machineId: alert.machine.id,
+                        sourceAlertId: alert.id,
+                        title: alert.message,
+                        category: requestCategory[alert.type as Exclude<AlertType, "PAYMENT_APPROVAL">]
+                      })}>
+                        <Wrench aria-hidden="true" /> Create service request
                       </button>
                     )}
                   </div>
